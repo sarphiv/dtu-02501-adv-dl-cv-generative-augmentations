@@ -5,6 +5,7 @@ from torchvision import tv_tensors
 import numpy as np
 import torch as  th 
 import cv2 
+from tqdm import tqdm
 
 
 # @dataclass
@@ -60,6 +61,8 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
     folder.mkdir(parents=True, exist_ok=True)
     
     th.save(annotation, folder / 'anno.pth')
+    cv2.imwrite(str(folder / 'img.png'), img)
+
     text_file = parent / mode / 'image_names.txt'
     with open(text_file, 'a') as file:
         file.write(img_id + ' ') 
@@ -67,8 +70,10 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
     
 def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Path('')):
 
-    for img_file in img_path.iterdir():
-        anno_file = anno_path / img_file.stem / ".txt"
+    for img_file in tqdm(img_path.iterdir()):
+        anno_file = anno_path / (img_file.stem + ".txt")
+        if not anno_file.exists():
+            continue
         preprocess_annotation(img_path = img_file, anno_path=anno_file, mode=mode, img_id=img_file.stem, parent=parent)
         
 
