@@ -7,7 +7,7 @@ import tyro
 @dataclass
 class ArtifactConfig:
     project_name: str = "generative-augmentations"
-    experiment_name: str = "experiment"
+    experiment_name: str | None = None
     wandb_entity: str = "metrics_logger"
 
     checkpoint_save_n_best: int = 3

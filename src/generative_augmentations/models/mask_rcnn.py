@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch as th
 from torchvision.models.detection import maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights
 from torchvision.models import ResNet50_Weights
@@ -31,28 +33,48 @@ class MaskRCNNModel(LightningModule):
         self.weight_decay = weight_decay
 
         self.num_classes = 80
+
+
         self.model = maskrcnn_resnet50_fpn_v2(
             num_classes=self.num_classes,
             weights=MaskRCNN_ResNet50_FPN_V2_Weights.COCO_V1 if pretrained_head else None,
             weights_backbone=ResNet50_Weights.IMAGENET1K_V2 if pretrained_backbone else None,
         )
 
-
-    def forward(self, x: th.Tensor):
-        return self.model(x)
-
-
-    def _step(self, batch: th.Tensor, batch_idx: int) -> th.Tensor:
-        pass
+        self.forward = self.model.forward
 
 
 
     def training_step(self, batch: th.Tensor, batch_idx: int) -> th.Tensor:
-        return self._step(batch, batch_idx)
+        
+        # TODO: batch should be images and targets,
+        #  check discord
+        images, targets = batch
+        
+        
+        loss_dict = cast(dict[str, th.Tensor], self.model.forward(images, targets))
+        loss = sum(loss for loss in loss_dict.values())
+        
+        # TODO: Logging
+
+
+        return loss
 
 
     def validation_step(self, batch: th.Tensor, batch_idx: int) -> th.Tensor:
-        return self._step(batch, batch_idx)
+        # TODO: batch should be images and targets,
+        #  check discord
+        images, targets = batch
+        
+        
+        loss_dict = cast(dict[str, th.Tensor], self.model.forward(images, targets))
+        loss = sum(loss for loss in loss_dict.values())
+
+
+        # TODO: Logging
+
+
+        return loss
 
 
 

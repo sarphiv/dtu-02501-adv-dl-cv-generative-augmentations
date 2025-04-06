@@ -23,7 +23,6 @@ def main(config: Config) -> int:
         entity=config.artifact.wandb_entity,
     )
 
-
     logger.experiment.config.update(config)
 
 
