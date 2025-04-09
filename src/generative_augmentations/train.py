@@ -8,6 +8,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from src.generative_augmentations.config import Config
 from src.generative_augmentations.models.mask_rcnn import MaskRCNNModel
+from src.generative_augmentations.datasets.datamodule import COCODataModule, MNISTDataModule
 
 
 
@@ -27,7 +28,7 @@ def main(config: Config) -> int:
 
 
     # Set up data
-    datamodule = ...
+    datamodule = COCODataModule(num_workers=0)
 
 
     # Set up trainer
@@ -70,9 +71,8 @@ def main(config: Config) -> int:
         pretrained_head=config.model.pretrained_head,
     )
 
-
     # Start training
-    trainer.fit(model, datamodule)
+    trainer.fit(model, datamodule=datamodule)
 
 
     # Return success
@@ -80,4 +80,5 @@ def main(config: Config) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(tyro.cli(main))
+    args = tyro.cli(Config)
+    sys.exit(main(args))

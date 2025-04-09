@@ -6,6 +6,7 @@ import numpy as np
 import torch as  th 
 import cv2 
 from tqdm import tqdm
+from pycocotools.mask import encode
 
 
 # @dataclass
@@ -44,7 +45,8 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
             endpoints = np.array(numbers[1:]).reshape(-1,2)
             endpoints = np.round(endpoints @ np.diag([height, width])).astype(np.int32)
             cv2.fillPoly(mask, [endpoints], color=1)
-            masks.append(mask)
+            rle_mask = encode(np.asfortranarray(mask.astype(np.uint8)))
+            masks.append(rle_mask)
             
             # Create bbox 
             lower_right = np.max(endpoints, axis=0)
@@ -53,7 +55,7 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
     
     # Convert to correct format 
     annotation = {'boxes': tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=(height, width)),
-                  'masks': tv_tensors.Mask(masks),
+                  'masks': masks, #tv_tensors.Mask(masks),
                   'labels': th.Tensor(labels)}
     
     # Check that the correct folders exists
@@ -79,5 +81,5 @@ def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Pa
 
 
 if __name__ == "__main__": 
-    preprocess_all(img_path=Path("data/coco/images/train2017"), anno_path=Path("data/coco/labels/train2017"), mode="train", parent=Path("data/coco"))
-    preprocess_all(img_path=Path("data/coco/images/val2017"), anno_path=Path("data/coco/labels/val2017"), mode="val", parent=Path("data/coco"))
+    preprocess_all(img_path=Path("data/raw/masks/coco/images/train2017"), anno_path=Path("data/raw/masks/coco/labels/train2017"), mode="train", parent=Path("data/coco"))
+    # preprocess_all(img_path=Path("data/coco/images/val2017"), anno_path=Path("data/coco/labels/val2017"), mode="val", parent=Path("data/coco"))
