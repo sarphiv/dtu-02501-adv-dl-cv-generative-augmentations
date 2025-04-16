@@ -49,12 +49,13 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
             masks.append(rle_mask)
             
             # Create bbox 
-            lower_right = np.max(endpoints, axis=0)
-            upper_left  = np.min(endpoints, axis=0)
+            lower_right = np.max(endpoints, axis=0)[[1,0]] # Need to have XY not YX
+            upper_left  = np.min(endpoints, axis=0)[[1,0]]
             boxes.append(np.concatenate([upper_left, lower_right]))
     
     # Convert to correct format 
-    annotation = {'boxes': tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=(height, width)),
+    annotation = {'boxes': boxes, #tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=(height, width)),
+                  'img_shape': (height, width), 
                   'masks': masks, #tv_tensors.Mask(masks),
                   'labels': th.Tensor(labels)}
     
@@ -71,7 +72,8 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
         
     
 def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Path('')):
-
+    # file_names = list(img_path.iterdir())
+    # np.random.sample(, )
     for img_file in tqdm(img_path.iterdir()):
         anno_file = anno_path / (img_file.stem + ".txt")
         if not anno_file.exists():
@@ -81,5 +83,5 @@ def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Pa
 
 
 if __name__ == "__main__": 
-    preprocess_all(img_path=Path("data/raw/masks/coco/images/train2017"), anno_path=Path("data/raw/masks/coco/labels/train2017"), mode="train", parent=Path("data/coco"))
+    preprocess_all(img_path=Path("data/raw/datatrain/train2017"), anno_path=Path("data/raw/datamasks/coco/labels/train2017"), mode="train", parent=Path("data/coco"))
     # preprocess_all(img_path=Path("data/coco/images/val2017"), anno_path=Path("data/coco/labels/val2017"), mode="val", parent=Path("data/coco"))

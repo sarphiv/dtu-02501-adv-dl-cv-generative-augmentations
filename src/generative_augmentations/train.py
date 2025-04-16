@@ -5,11 +5,20 @@ import torch as th
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 from src.generative_augmentations.config import Config
 from src.generative_augmentations.models.mask_rcnn import MaskRCNNModel
-from src.generative_augmentations.datasets.datamodule import COCODataModule, MNISTDataModule
+from src.generative_augmentations.datasets.datamodule import COCODataModule
 
+my_trans = transform = A.Compose(
+    [
+        A.Normalize(),
+        ToTensorV2()
+    ],
+    bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']),
+)
 
 
 def main(config: Config) -> int:
@@ -28,7 +37,7 @@ def main(config: Config) -> int:
 
 
     # Set up data
-    datamodule = COCODataModule(num_workers=0)
+    datamodule = COCODataModule(num_workers=0, transform=my_trans)
 
 
     # Set up trainer

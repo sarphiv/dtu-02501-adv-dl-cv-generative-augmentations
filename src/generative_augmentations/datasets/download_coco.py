@@ -28,5 +28,5 @@ for (url, file) in zip(urls, zipfiles):
 
 #unpack zip files : 
 for (file, dir) in zip(zipfiles, output_extentions):
-    with zipfile.Zipfile(file, 'r') as zip_ref: 
+    with zipfile.ZipFile(file, 'r') as zip_ref: 
         zip_ref.extractall(output_dir + dir)

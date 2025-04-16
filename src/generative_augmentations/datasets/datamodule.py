@@ -1,4 +1,5 @@
 from pathlib import Path 
+from typing import Callable
 
 import lightning as pl
 import torch as th 
@@ -7,10 +8,16 @@ import cv2
 from pycocotools.mask import decode
 from torchvision import tv_tensors
 
+def collate_img_anno(batch): 
+    images = [item[0] for item in batch]
+    annotations = [item[1] for item in batch]
+    return images, annotations
+
 class COCODataset(Dataset): 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, transform=None) -> None: 
         super().__init__()
         self.path = path 
+        self.transform = transform
         with open(path / 'image_names.txt', 'r') as file:
             line = file.readline().strip()
         self.folders = line.split(' ')
@@ -22,62 +29,49 @@ class COCODataset(Dataset):
         folder = self.folders[i]
         img = cv2.imread(self.path / (folder + "/img.png"))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        annotations = th.load(self.path / (folder + "/anno.pth"))
+        annotations = th.load(self.path / (folder + "/anno.pth"), weights_only=False)
         
         masks = annotations["masks"]
-        masks_full = [th.tensor(decode(mask)) for mask in masks]
-        annotations['masks'] = tv_tensors.Mask(masks_full)
+        masks_full = [decode(mask) for mask in masks]
         
+        if self.transform:
+            augmented = self.transform(
+                image=img,
+                masks=masks_full,
+                bboxes=annotations['boxes'],
+                class_labels=annotations['labels'].numpy()
+            )
+            img = augmented['image']
+            masks_full = th.stack(augmented['masks'])
+            boxes = augmented['bboxes']
+            class_labels = augmented['class_labels']
+
+        annotations['img_shape'] = (img.shape[0], img.shape[1])
+        annotations['masks'] = tv_tensors.Mask(data=masks_full)
+        annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
+        annotations['labels'] = th.tensor(class_labels.astype(int))
+    
         return img, annotations
     
-    
 class COCODataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transforms=None):
+    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.transform = transform
         
         self.setup()
 
     def setup(self, stage=None):
-        self.train_set = COCODataset(self.data_dir / 'train')
-        # self.val_set = COCODataset(self.data_dir / 'val')
+        self.train_set = COCODataset(self.data_dir / 'train', transform=self.transform)
+        # self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform)
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+        return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno)
 
     # def val_dataloader(self):
     #     return DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers)
 
     # def test_dataloader(self):
     #     return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers)
-
-from torch.utils.data import random_split
-from torchvision.datasets import MNIST
-
-class MNISTDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = "path/to/dir", batch_size: int = 32):
-        super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
-
-    def setup(self, stage: str):
-        self.mnist_test = MNIST(self.data_dir, train=False)
-        self.mnist_predict = MNIST(self.data_dir, train=False)
-        mnist_full = MNIST(self.data_dir, train=True)
-        self.mnist_train, self.mnist_val = random_split(
-            mnist_full, [55000, 5000], generator=th.Generator().manual_seed(42)
-        )
-
-    def train_dataloader(self):
-        return DataLoader(self.mnist_train, batch_size=self.batch_size)
-
-    def val_dataloader(self):
-        return DataLoader(self.mnist_val, batch_size=self.batch_size)
-
-    def test_dataloader(self):
-        return DataLoader(self.mnist_test, batch_size=self.batch_size)
-
-    def predict_dataloader(self):
-        return DataLoader(self.mnist_predict, batch_size=self.batch_size)

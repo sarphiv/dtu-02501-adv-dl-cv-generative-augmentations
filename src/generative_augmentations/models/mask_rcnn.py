@@ -51,8 +51,8 @@ class MaskRCNNModel(LightningModule):
         #  check discord
         images, targets = batch
         
-        
-        loss_dict = cast(dict[str, th.Tensor], self.model.forward(images, targets))
+        output = self.model.forward(images, targets)
+        loss_dict = cast(dict[str, th.Tensor], output)
         loss = sum(loss for loss in loss_dict.values())
         
         # TODO: Logging
