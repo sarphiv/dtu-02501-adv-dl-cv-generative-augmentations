@@ -3,7 +3,7 @@ from typing import Callable
 
 import lightning as pl
 import torch as th 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import cv2 
 from pycocotools.mask import decode
 from torchvision import tv_tensors
@@ -54,24 +54,29 @@ class COCODataset(Dataset):
         return img, annotations
     
 class COCODataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None):
+    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None, data_fraction: float = 1):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.transform = transform
+        self.data_fraction = data_fraction
         
         self.setup()
 
     def setup(self, stage=None):
-        self.train_set = COCODataset(self.data_dir / 'train', transform=self.transform)
-        # self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform)
+        train_set = COCODataset(self.data_dir / 'train', transform=self.transform)
+        n_train = len(train_set)
+        train_idx = th.randperm(n_train)[:int(n_train*self.data_fraction)].tolist()
+        
+        self.train_set = Subset(train_set, train_idx)
+        self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform)
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno)
 
-    # def val_dataloader(self):
-    #     return DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers)
+    def val_dataloader(self):
+        return DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, collate_fn=collate_img_anno)
 
     # def test_dataloader(self):
     #     return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers)

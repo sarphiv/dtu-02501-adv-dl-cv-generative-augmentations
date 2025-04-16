@@ -1,4 +1,5 @@
 from typing import cast
+import types
 
 import torch as th
 from torchvision.models.detection import maskrcnn_resnet50_fpn_v2, MaskRCNN_ResNet50_FPN_V2_Weights
@@ -43,6 +44,8 @@ class MaskRCNNModel(LightningModule):
 
         self.forward = self.model.forward
 
+        eager_outputs_new = lambda self, losses, detections: (losses, detections)
+        self.model.eager_outputs = types.MethodType(eager_outputs_new, self.model)
 
 
     def training_step(self, batch: th.Tensor, batch_idx: int) -> th.Tensor:
@@ -51,8 +54,8 @@ class MaskRCNNModel(LightningModule):
         #  check discord
         images, targets = batch
         
-        output = self.model.forward(images, targets)
-        loss_dict = cast(dict[str, th.Tensor], output)
+        (losses, detections) = self.model.forward(images, targets)
+        loss_dict = cast(dict[str, th.Tensor], losses)
         loss = sum(loss for loss in loss_dict.values())
         
         # TODO: Logging
@@ -65,10 +68,16 @@ class MaskRCNNModel(LightningModule):
         # TODO: batch should be images and targets,
         #  check discord
         images, targets = batch
+
+        self.model.rpn.train()
+        self.model.roi_heads.train()
         
-        
-        loss_dict = cast(dict[str, th.Tensor], self.model.forward(images, targets))
+        (losses, detections) = self.model.forward(images, targets)
+        loss_dict = cast(dict[str, th.Tensor], losses)
         loss = sum(loss for loss in loss_dict.values())
+
+        self.model.rpn.eval()
+        self.model.roi_heads.eval()
 
 
         # TODO: Logging

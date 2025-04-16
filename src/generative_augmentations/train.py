@@ -37,7 +37,7 @@ def main(config: Config) -> int:
 
 
     # Set up data
-    datamodule = COCODataModule(num_workers=0, transform=my_trans)
+    datamodule = COCODataModule(num_workers=0, transform=my_trans, data_fraction=0.125)
 
 
     # Set up trainer
