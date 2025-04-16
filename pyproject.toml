@@ -21,6 +21,7 @@ dependencies = [
 
 
 # PyTorch from official registry
+# TODO: Remove this, testing jujutsu commit signing
 [[tool.uv.index]]
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
