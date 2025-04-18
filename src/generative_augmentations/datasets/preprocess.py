@@ -40,17 +40,17 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
             numbers = list(map(float, line.split(" ")))
             labels.append(numbers[0])
             
-            # Create mask 
+            # Create mask # TODO: This time make sure we did it correctly (plot some images with bboxes of different shapes)
             mask = np.zeros((height, width))
             endpoints = np.array(numbers[1:]).reshape(-1,2)
-            endpoints = np.round(endpoints @ np.diag([height, width])).astype(np.int32)
+            endpoints = np.round(endpoints @ np.diag([width, height])).astype(np.int32)
             cv2.fillPoly(mask, [endpoints], color=1)
             rle_mask = encode(np.asfortranarray(mask.astype(np.uint8)))
             masks.append(rle_mask)
             
             # Create bbox 
-            lower_right = np.max(endpoints, axis=0)[[1,0]] # Need to have XY not YX
-            upper_left  = np.min(endpoints, axis=0)[[1,0]]
+            lower_right = np.max(endpoints, axis=0)#[[1,0]] # Need to have XY not YX
+            upper_left  = np.min(endpoints, axis=0)#[[1,0]]
             boxes.append(np.concatenate([upper_left, lower_right]))
     
     # Convert to correct format 

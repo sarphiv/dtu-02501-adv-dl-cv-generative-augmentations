@@ -46,7 +46,7 @@ class COCODataset(Dataset):
             boxes = augmented['bboxes']
             class_labels = augmented['class_labels']
 
-        annotations['img_shape'] = (img.shape[0], img.shape[1])
+        annotations['img_shape'] = (img.shape[1], img.shape[2])
         annotations['masks'] = tv_tensors.Mask(data=masks_full)
         annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
         annotations['labels'] = th.tensor(class_labels.astype(int))
