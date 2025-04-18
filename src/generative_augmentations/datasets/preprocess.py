@@ -84,5 +84,5 @@ def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Pa
 
 
 if __name__ == "__main__": 
-    preprocess_all(img_path=Path("data/raw/datatrain/train2017"), anno_path=Path("data/raw/datamasks/coco/labels/train2017"), mode="train", parent=Path("data/coco"), n_samples=10000)
-    preprocess_all(img_path=Path("data/raw/dataval/val2017"), anno_path=Path("data/raw/datamasks/coco/labels/val2017"), mode="val", parent=Path("data/coco"), n_samples=1000)
+    preprocess_all(img_path=Path("data/raw/train"), anno_path=Path("data/raw/seg/labels/train2017"), mode="train", parent=Path("data/processed"), n_samples=10000)
+    preprocess_all(img_path=Path("data/raw/val"), anno_path=Path("data/raw/seg/labels/val2017"), mode="val", parent=Path("data/processed"), n_samples=1000)
