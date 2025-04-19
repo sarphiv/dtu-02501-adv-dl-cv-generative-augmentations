@@ -34,13 +34,15 @@ class COCODataset(Dataset):
         
         masks = annotations["masks"]
         masks_full = [decode(mask) for mask in masks]
+        boxes = annotations['boxes']
+        class_labels = annotations['labels'].numpy()
 
         if self.include_original_image: annotations['image'] = img
         if self.transform:
             augmented = self.transform(
                 image=img,
                 masks=masks_full,
-                bboxes=annotations['boxes'],
+                bboxes=boxes,
                 class_labels=annotations['labels'].numpy()
             )
             img = augmented['image']
@@ -82,3 +84,21 @@ class COCODataModule(pl.LightningDataModule):
 
     # def test_dataloader(self):
     #     return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=self.num_workers)
+
+
+if __name__ == "__main__": 
+    from tqdm import tqdm
+
+    dm = COCODataModule(batch_size=2, num_workers=0)
+    dm.setup()
+    dl = dm.train_dataloader()
+
+    unique_labels = set()
+    for batch in tqdm(dl):
+        images = batch[0]
+        annotations = batch[1]
+        for annotation in annotations:
+            new_labels = set(annotation['labels'].detach().numpy())
+            unique_labels = unique_labels.union(new_labels)
+
+    len(unique_labels) # This gives us 80

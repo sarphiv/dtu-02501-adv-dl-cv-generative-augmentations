@@ -9,7 +9,7 @@ def plot_segmentation(image, target, detection):
     ax[0,0].imshow(image)
     ax[0,0].set_title("(Unnormalized) Augmented Image")
 
-    original_image = target['image'].detach().cpu().numpy()
+    original_image = target['image']
     ax[0,1].imshow(original_image)
     ax[0,1].set_title("Original Image")
  
