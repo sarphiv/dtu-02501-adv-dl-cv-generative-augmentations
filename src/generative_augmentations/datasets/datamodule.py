@@ -14,10 +14,11 @@ def collate_img_anno(batch):
     return images, annotations
 
 class COCODataset(Dataset): 
-    def __init__(self, path: Path, transform=None) -> None: 
+    def __init__(self, path: Path, transform=None, include_original_image=False) -> None: 
         super().__init__()
         self.path = path 
         self.transform = transform
+        self.include_original_image = include_original_image
         with open(path / 'image_names.txt', 'r') as file:
             line = file.readline().strip()
         self.folders = line.split(' ')
@@ -33,7 +34,8 @@ class COCODataset(Dataset):
         
         masks = annotations["masks"]
         masks_full = [decode(mask) for mask in masks]
-        
+
+        if self.include_original_image: annotations['image'] = img
         if self.transform:
             augmented = self.transform(
                 image=img,
@@ -70,7 +72,7 @@ class COCODataModule(pl.LightningDataModule):
         train_idx = th.randperm(n_train)[:int(n_train*self.data_fraction)].tolist()
         
         self.train_set = Subset(train_set, train_idx)
-        self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform)
+        self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform, include_original_image=True)
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno)

@@ -7,6 +7,9 @@ from torchvision.models import ResNet50_Weights
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import OptimizerLRScheduler
 from pytorch_optimizer import create_optimizer
+import wandb
+
+from src.generative_augmentations.utils.plotting import plot_segmentation
 
 
 class MaskRCNNModel(LightningModule):
@@ -33,7 +36,7 @@ class MaskRCNNModel(LightningModule):
         self.learning_rate_warmup_steps = learning_rate_warmup_steps
         self.weight_decay = weight_decay
 
-        self.num_classes = 80
+        self.num_classes = 80 # 91? 
 
 
         self.model = maskrcnn_resnet50_fpn_v2(
@@ -44,12 +47,13 @@ class MaskRCNNModel(LightningModule):
 
         self.forward = self.model.forward
 
+        # Monkey patches so we can get validation loss (usually Mask RNN does not compute that, but only detections)
         eager_outputs_new = lambda self, losses, detections: (losses, detections)
         self.model.eager_outputs = types.MethodType(eager_outputs_new, self.model)
-
+        
 
     def training_step(self, batch: th.Tensor, batch_idx: int) -> th.Tensor:
-        
+        # TODO: figure out how many classes we actually have.   
         # TODO: batch should be images and targets,
         #  check discord
         images, targets = batch
@@ -59,7 +63,7 @@ class MaskRCNNModel(LightningModule):
         loss = sum(loss for loss in loss_dict.values())
         
         # TODO: Logging
-
+        self.log('train_loss', loss)
 
         return loss
 
@@ -75,12 +79,19 @@ class MaskRCNNModel(LightningModule):
         (losses, detections) = self.model.forward(images, targets)
         loss_dict = cast(dict[str, th.Tensor], losses)
         loss = sum(loss for loss in loss_dict.values())
-
+        self.log('val_loss', loss)
         self.model.rpn.eval()
         self.model.roi_heads.eval()
 
+        if batch_idx == 0: 
+            (losses, detections) = self.model.forward(images, targets)
 
-        # TODO: Logging
+            log_images = []
+            for i, image in enumerate(images): 
+                fig = plot_segmentation(image=images[0], target=targets[0], detection=detections[0])
+                log_images.append(wandb.Image(fig))
+            
+            self.logger.log_image(key="Instance Segmentations", images=log_images)
 
 
         return loss
