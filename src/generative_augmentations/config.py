@@ -17,7 +17,9 @@ class ArtifactConfig:
 @dataclass
 class DataloaderConfig:
     num_workers: int = 8
-    batch_size: int = 20
+    batch_size: int = 3
+    data_fraction: float = 1. 
+    data_dir: str = '../scratch/coco'
 
 
 

@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import tyro
 import torch as th
@@ -37,7 +38,11 @@ def main(config: Config) -> int:
 
 
     # Set up data
-    datamodule = COCODataModule(num_workers=0, transform=my_trans, data_fraction=0.125)
+    datamodule = COCODataModule(num_workers=config.dataloader.num_workers,
+                                batch_size=config.dataloader.batch_size,
+                                transform=my_trans, 
+                                data_fraction=config.dataloader.data_fraction,
+                                data_dir=Path(config.dataloader.data_dir))
 
 
     # Set up trainer
