@@ -5,7 +5,7 @@ import re
 import logging
 
 import torch as th
-from torchvision.transforms.functional import to_tensor
+from torchvision.transforms.functional import to_tensor, resize
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from pycocotools.mask import decode
@@ -15,6 +15,12 @@ from transformers.pipelines.text_generation import TextGenerationPipeline
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from controlnet_aux.processor import HEDdetector
+from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.models.controlnets.controlnet import ControlNetModel
+from diffusers.pipelines.controlnet.pipeline_controlnet_inpaint_sd_xl import StableDiffusionXLControlNetInpaintPipeline
+from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+
+from src.generative_augmentations.datasets.coco import index_to_name
 
 
 # TODO:
@@ -35,6 +41,8 @@ from controlnet_aux.processor import HEDdetector
 
 
 
+
+
 class VariantGeneration:
     def __init__(self, input_dir: Path, output_dir: Path | None = None, num_variants: int = 3, num_workers: int = -4, device: th.device | None = None) -> None:
         self.input_dir = input_dir
@@ -43,7 +51,8 @@ class VariantGeneration:
 
         self.num_workers = num_workers
         self.device = device if device else th.device("cuda" if th.cuda.is_available() else "cpu")
-        self.dtype = th.float16 if th.cuda.is_available() else th.float32
+        self.dtype = th.bfloat16 if th.cuda.is_available() else th.float32
+
         # Based upon: https://arxiv.org/abs/2406.09414
         self.depth_model = self._get_depth_model()
         # Based upon: https://arxiv.org/abs/2302.05543
@@ -51,8 +60,10 @@ class VariantGeneration:
         # Based upon: https://arxiv.org/abs/2311.06242
         self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
         self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
-        # Based upon:
+        # Based upon: https://arxiv.org/abs/2407.10671
         self.prompt_model = self._get_prompt_model()
+        # Based upon: https://arxiv.org/abs/2307.01952
+        self.diffusion_model = self._get_diffusion_model()
         
 
         with open(self.input_dir / "image_names.txt", 'r') as file:
@@ -68,7 +79,7 @@ class VariantGeneration:
         # Get depth model pipeline
         pipe = cast(
             DepthEstimationPipeline,
-            pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Large-hf", torch_dtype=self.dtype, device_map=self.device)
+            pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Large-hf", device_map=self.device)
         )
 
         # Reset logger level
@@ -97,13 +108,38 @@ class VariantGeneration:
         return pipe
 
 
+    def _get_diffusion_model(self) -> StableDiffusionXLControlNetInpaintPipeline:
+        controlnet_depth = ControlNetModel.from_pretrained(
+            "diffusers/controlnet-depth-sdxl-1.0",
+            use_safetensors=True,
+            torch_dtype=self.dtype,
+        )
+        controlnet_edge = ControlNetModel.from_pretrained(
+            "SargeZT/controlnet-sd-xl-1.0-softedge-dexined",
+            # "diffusers/controlnet-canny-sdxl-1.0",
+            torch_dtype=self.dtype,
+        )
+        
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=self.dtype)
+        
+        diffusion_model = StableDiffusionXLControlNetInpaintPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            controlnet=[controlnet_depth, controlnet_edge],
+            vae=vae,
+            torch_dtype=self.dtype
+        ).to(self.device)
+
+        # self.diffusion_model.enable_model_cpu_offload()
+
+        return diffusion_model
+
 
     def _estimate_depth(self, img: Image.Image) -> th.Tensor:
         return self.depth_model(img)["predicted_depth"].to(self.device) # type: ignore
 
 
     def _estimate_edges(self, img: Image.Image) -> th.Tensor:
-        return th.tensor(self.edge_model(img, output_type="numpy")).to(device=self.device, dtype=th.float32) / 255.0
+        return th.tensor(self.edge_model(img, output_type="numpy")).permute(2, 0, 1).to(device=self.device, dtype=th.float32) / 255.0
 
 
     def _describe_object(self, img: th.Tensor) -> str:
@@ -115,7 +151,7 @@ class VariantGeneration:
         prompt = "<MORE_DETAILED_CAPTION>"
         inputs = self.vqa_model_tokenizer(
             text=prompt,
-            images=img,
+            images=img * 255.0,
             return_tensors="pt"
         ).to(self.vqa_model.device, self.vqa_model.dtype)
 
@@ -123,7 +159,7 @@ class VariantGeneration:
         generated_ids = self.vqa_model.generate(
             input_ids=inputs["input_ids"],
             pixel_values=inputs["pixel_values"],
-            max_new_tokens=24,
+            max_new_tokens=32,
             num_beams=3
         )
 
@@ -149,7 +185,7 @@ class VariantGeneration:
             # NOTE: You have no idea how long it took me to prompt engineer this
             instructions = [
                 {"role": "system", "content": "You are strictly a text model part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program. You must provide MULTIPLE reformulations as a Python list of strings. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change up the colors and lighting in the reformulations."},
-                {"role": "user", "content": "The image is a close-up of a yellow tennis ball in the air. The ball is in focus,"},
+                {"role": "user", "content": description},
             ]
 
             # Prompt model to give more descriptions
@@ -157,11 +193,32 @@ class VariantGeneration:
 
             # Parse output
             output: str = cast(str, outputs[0]["generated_text"][-1]['content'].strip().strip("[]'\"")) # type: ignore
-            prompts.extend(re.split(r"[\"\'], ?[\"\']", output))
+            prompts.extend(re.split(r"[\"\'],[ \n]*[\"\']", output))
 
 
         # Take the first num_variants, prepend the label and return the prompt
-        return [f"The image is of a {label}. {prompt}" for prompt in prompts[:self.num_variants]]
+        return [f"The image depicts: {label}. {prompt}" for prompt in prompts[:self.num_variants]]
+
+
+    def _generate_inpaint(self, img: th.Tensor, mask: th.Tensor, depths: th.Tensor, edges: th.Tensor, prompt: str) -> th.Tensor:
+        depth_min, depth_max = depths.min(), depths.max()
+        depths = (depths - depth_min) / (depth_max - depth_min)
+        edges = resize(edges, list(depths.shape))
+
+        variant = self.diffusion_model(
+            prompt=prompt,
+            negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
+            num_inference_steps=20,
+            eta=1.0,
+            image=img,
+            mask_image=mask,
+            control_image=[depths[None, None].repeat(1, 3, 1, 1), edges[None]],
+            strength=1.0,
+            controlnet_conditioning_scale=[0.9, 0.5],
+            guidance_scale=7.5,
+        ).images[0] # type: ignore
+
+        return to_tensor(variant).to(self.device, dtype=self.dtype)
 
 
     def generate_variants(self, img_dir: Path) -> None:
@@ -171,7 +228,6 @@ class VariantGeneration:
         bboxes = annotations["boxes"]
         masks = annotations["masks"]
         labels = annotations["labels"]
-        
 
 
         img = Image.open(img_dir / "img.png")
@@ -180,13 +236,13 @@ class VariantGeneration:
         img = to_tensor(img).to(self.device)
 
         for instance_idx in range(len(bboxes)):
-            # Decode mask
-            mask = decode(masks[instance_idx])
+            # Decode instance segmentation mask
+            mask = th.tensor(decode(masks[instance_idx]), dtype=self.dtype).to(self.device)
 
+            # Mean depth to determine draw order
+            depth_instance = (depths[instance_idx] * mask).sum() / (mask.sum() + 1e-6)
 
-            # TODO: Estimate mean depth for this instance to determine draw order
-
-
+            # Bounding box for instance
             x1, y1, x2, y2 = bboxes[instance_idx]
             context_factor = 0.05
 
@@ -197,25 +253,39 @@ class VariantGeneration:
                     :,
                     int(y1*(1-context_factor)):int(y2*(1+context_factor)),
                     int(x1*(1-context_factor)):int(x2*(1+context_factor)),
-                ] * 255
+                ]
             )
 
             # Reforumlate prompt into multiple variants
-            # TODO: Map label index to label name
-            prompts = self._generate_prompts(prompt_base, labels[instance_idx])
+            prompts = self._generate_prompts(prompt_base, index_to_name[labels[instance_idx].item()])
 
 
 
             for variant_idx in range(self.num_variants):
-                # Inpaint image based upon mask, depth, edge, and prompt
+                variant = self._generate_inpaint(img, mask, depths, edges, prompts[variant_idx])
                 
+                import matplotlib.pyplot as plt
+                plt.imshow(variant.permute(1, 2, 0).cpu().float().numpy())
+                plt.show()
                 
+            # TODO: Remember to store the instance depth value
+            # TODO: Disable all those annoying log messages
+            # TODO: Figure out why florence is so slow at loading initially
 
 
     def run(self) -> None:
+        pass
         # TODO: Run stuff in parallel, process all images
         # TODO: Pretty progress bars
 
 
 if __name__ == "__main__":
-    ...
+    variant_gen = VariantGeneration(
+        input_dir=Path("data/processed/train"),
+        num_variants=3,
+        num_workers=-4,
+    )
+
+    # variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[5])
+    variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[6])
+    variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[7])
