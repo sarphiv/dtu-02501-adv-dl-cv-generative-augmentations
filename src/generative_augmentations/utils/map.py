@@ -7,7 +7,7 @@ def IoU(mask1, mask2):
     return intersection / union
 
 
-def average_precision(targets, detections, iou_threshold=0.5, num_classes=80):
+def average_precision(targets, detections, iou_threshold=0.5, det_mask_threshold = 0.5, num_classes=80):
     true_positives = np.zeros(num_classes)
     false_positives = np.zeros(num_classes)
     false_negatives = np.zeros(num_classes)
@@ -42,7 +42,7 @@ def average_precision(targets, detections, iou_threshold=0.5, num_classes=80):
             no_det += 1
 
             target_masks = images[img_id]["target"]
-            detection_mask = images[img_id]["detection"][det_idx]
+            detection_mask = images[img_id]["detection"][det_idx] > det_mask_threshold
 
             if len(target_masks) == 0:
                 false_positives[class_id] += 1
