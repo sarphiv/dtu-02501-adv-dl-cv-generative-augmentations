@@ -10,6 +10,7 @@ from pytorch_optimizer import create_optimizer
 import wandb
 
 from src.generative_augmentations.utils.plotting import plot_segmentation
+from src.generative_augmentations.utils.map import average_precision
 
 
 class MaskRCNNModel(LightningModule):
@@ -36,7 +37,7 @@ class MaskRCNNModel(LightningModule):
         self.learning_rate_warmup_steps = learning_rate_warmup_steps
         self.weight_decay = weight_decay
 
-        self.num_classes = 80 # 91? 
+        self.num_classes = 91#80 # 91? 
 
 
         self.model = maskrcnn_resnet50_fpn_v2(
@@ -83,15 +84,21 @@ class MaskRCNNModel(LightningModule):
         self.model.rpn.eval()
         self.model.roi_heads.eval()
 
-        if batch_idx == 0: 
-            (losses, detections) = self.model.forward(images, targets)
 
+        (losses, detections) = self.model.forward(images, targets)
+
+
+        if batch_idx == 0: 
             log_images = []
             for i, image in enumerate(images): 
-                fig = plot_segmentation(image=images[0], target=targets[0], detection=detections[0])
+                fig = plot_segmentation(image=image, target=targets[i], detection=detections[i])
                 log_images.append(wandb.Image(fig))
             
             self.logger.log_image(key="Instance Segmentations", images=log_images)
+        
+        # Average Precision 
+        mAP = average_precision(targets=targets, detections=detections)
+        self.log('val_map', mAP)
 
 
         return loss
