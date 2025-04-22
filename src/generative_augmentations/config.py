@@ -16,6 +16,8 @@ class ArtifactConfig:
 
 @dataclass
 class DataloaderConfig:
+    processed_data_dir: str = "data/processed"
+
     num_workers: int = 8
     batch_size: int = 20
 
