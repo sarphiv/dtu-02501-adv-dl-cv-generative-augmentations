@@ -82,4 +82,5 @@ index_to_name = {
     77: "teddy bear",
     78: "hair drier",
     79: "toothbrush",
+    80: "background",
 }

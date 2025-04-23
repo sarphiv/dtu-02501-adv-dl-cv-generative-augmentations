@@ -9,7 +9,7 @@ from pycocotools.mask import decode
 from torchvision import tv_tensors
 
 def collate_img_anno(batch): 
-    images = [item[0] for item in batch]
+    images = th.stack([item[0] for item in batch])
     annotations = [item[1] for item in batch]
     return images, annotations
 
@@ -49,9 +49,20 @@ class COCODataset(Dataset):
             masks_full = th.stack(augmented['masks'])
             boxes = augmented['bboxes']
             class_labels = augmented['class_labels']
+        
+        area = th.tensor([mask.sum() for mask in masks_full]).argsort(descending=True)
+
+        segmentation_mask = th.zeros_like(masks_full[0], dtype=th.long) + 80# th.zeros(80, *masks_full[0].shape) # TODO: How do we collapse classes? Is the order here the draw order. 
+        # for i, label in enumerate(class_labels):
+        #     segmentation_mask[int(label)][masks_full[i].to(bool)] = 1
+        for a in area:
+            segmentation_mask[masks_full[a].to(bool)]  = int(class_labels[a]) 
+        # for (c, m) in zip(class_labels, masks_full): 
+        #     segmentation_mask[m.to(bool)] = int(c) + 1
 
         annotations['img_shape'] = (img.shape[1], img.shape[2])
         annotations['masks'] = tv_tensors.Mask(data=masks_full)
+        annotations['semantic_mask'] = segmentation_mask
         annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
         annotations['labels'] = th.tensor(class_labels.astype(int))
     
