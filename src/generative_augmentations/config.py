@@ -15,7 +15,8 @@ class ArtifactConfig:
 
 @dataclass
 class VarientGenerationConfig: 
-    subset: tuple[float, float] = (0.0, 1.0)
+    subset_start: float = 0.0
+    subset_end: float = 1.0
     num_variants: int = 3
     bbox_min_side_length: int = 75
 

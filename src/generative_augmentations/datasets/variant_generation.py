@@ -342,9 +342,8 @@ class VariantGeneration:
 
 if __name__ == "__main__":
     args = tyro.cli(Config)
-    (start, end) = args.varient_generation.subset
     VariantGeneration(
         input_dir=Path(args.dataloader.processed_data_dir) / "train",
         num_variants=args.varient_generation.num_variants,
         bbox_min_side_length=args.varient_generation.bbox_min_side_length
-    ).run(start=start, end=end)
+    ).run(start=args.varient_generation.subset_start, end=args.varient_generation.subset_end)
