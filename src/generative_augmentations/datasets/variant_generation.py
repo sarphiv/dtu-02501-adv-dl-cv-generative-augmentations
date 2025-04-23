@@ -328,8 +328,13 @@ class VariantGeneration:
 
 
 
-    def run(self, offset: int = 0) -> None:
-        for img_dir in (pbar := tqdm(self.img_dirs[offset:])):
+    def run(self, start: int | float = 0.0, end: int | float = 1.0) -> None:
+        if isinstance(start, float):
+            start = int(start * len(self.img_dirs))
+        if isinstance(end, float):
+            end = int(end * len(self.img_dirs))
+
+        for img_dir in (pbar := tqdm(self.img_dirs[start:end])):
             pbar.set_description(f"Processing - {img_dir}")
             self.generate_variants(self.input_dir / img_dir)
 
@@ -341,4 +346,4 @@ if __name__ == "__main__":
     VariantGeneration(
         input_dir=Path(args.dataloader.processed_data_dir) / "train",
         num_variants=3
-    ).run(offset=0)
+    ).run(start=0.0, end=1.0)
