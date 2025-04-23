@@ -13,10 +13,15 @@ class ArtifactConfig:
     checkpoint_save_n_best: int = 3
     checkpoint_save_every_n_steps: int = 1000
 
+@dataclass
+class VarientGenerationConfig: 
+    subset: tuple[float, float] = (0.0, 1.0)
+    num_variants: int = 3
+    bbox_min_side_length: int = 75
 
 @dataclass
 class DataloaderConfig:
-    processed_data_dir: str = "data/processed"
+    processed_data_dir: str = "../scratch/coco"
 
     num_workers: int = 8
     batch_size: int = 3
@@ -49,3 +54,5 @@ class Config:
     artifact: ArtifactConfig = field(default_factory=lambda: ArtifactConfig())
     dataloader: DataloaderConfig = field(default_factory=lambda: DataloaderConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
+
+    varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
