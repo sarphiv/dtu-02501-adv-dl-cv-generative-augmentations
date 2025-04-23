@@ -10,8 +10,8 @@ class ArtifactConfig:
     experiment_name: str | None = None
     wandb_entity: str = "metrics_logger"
 
-    checkpoint_save_n_best: int = 3
-    checkpoint_save_every_n_steps: int = 1000
+    checkpoint_save_n_best: int = 1
+    checkpoint_save_every_n_steps: int = 10000
 
 @dataclass
 class VarientGenerationConfig: 
@@ -25,8 +25,8 @@ class DataloaderConfig:
     processed_data_dir: str = "../scratch/coco"
 
     num_workers: int = 8
-    batch_size: int = 3
-    data_fraction: float = 1. 
+    batch_size: int = 32
+    data_fraction: float = 1.0
     data_dir: str = '../scratch/coco'
 
 

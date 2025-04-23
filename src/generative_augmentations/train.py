@@ -10,11 +10,12 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
 from src.generative_augmentations.config import Config
-from src.generative_augmentations.models.mask_rcnn import MaskRCNNModel
+from src.generative_augmentations.models.deeplab import DeepLabv3Lightning
 from src.generative_augmentations.datasets.datamodule import COCODataModule
 
 my_trans = transform = A.Compose(
     [
+        A.Resize(224, 224),
         A.Normalize(),
         ToTensorV2()
     ],
@@ -25,7 +26,6 @@ my_trans = transform = A.Compose(
 def main(config: Config) -> int:
     # Reproducibility
     seed_everything(config.seed)
-
 
     # Set up logging
     logger = WandbLogger(
@@ -62,18 +62,29 @@ def main(config: Config) -> int:
                 mode="min",
                 monitor="val_loss",
             ),
-            ModelCheckpoint(
-                dirpath="models/{logger.experiment.name}:{logger.experiment.hash}/",
-                filename=f"{logger.experiment.id}" + ":all:{epoch:02d}:{step}:{val_loss:.3f}",
-                every_n_train_steps=config.artifact.checkpoint_save_every_n_steps,
-                save_top_k=-1,
-            ),
+            # ModelCheckpoint(
+            #     dirpath="models/{logger.experiment.name}:{logger.experiment.hash}/",
+            #     filename=f"{logger.experiment.id}" + ":all:{epoch:02d}:{step}:{val_loss:.3f}",
+            #     every_n_train_steps=config.artifact.checkpoint_save_every_n_steps,
+            #     save_top_k=-1,
+            # ),
         ],
     )
 
 
     # Set up model
-    model = MaskRCNNModel(
+    # model = MaskRCNNModel(
+    #     learning_rate_max=config.model.learning_rate_max,
+    #     learning_rate_min=config.model.learning_rate_min,
+    #     learning_rate_half_period=config.model.learning_rate_half_period,
+    #     learning_rate_mult_period=config.model.learning_rate_mult_period,
+    #     learning_rate_warmup_max=config.model.learning_rate_warmup_max,
+    #     learning_rate_warmup_steps=config.model.learning_rate_warmup_steps,
+    #     weight_decay=config.model.weight_decay,
+    #     pretrained_backbone=config.model.pretrained_backbone,
+    #     pretrained_head=config.model.pretrained_head,
+    # )
+    model = DeepLabv3Lightning(
         learning_rate_max=config.model.learning_rate_max,
         learning_rate_min=config.model.learning_rate_min,
         learning_rate_half_period=config.model.learning_rate_half_period,
@@ -82,7 +93,7 @@ def main(config: Config) -> int:
         learning_rate_warmup_steps=config.model.learning_rate_warmup_steps,
         weight_decay=config.model.weight_decay,
         pretrained_backbone=config.model.pretrained_backbone,
-        pretrained_head=config.model.pretrained_head,
+        num_classes=81
     )
 
     # Start training
