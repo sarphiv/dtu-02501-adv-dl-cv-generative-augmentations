@@ -3,24 +3,27 @@ from pathlib import Path
 from PIL import Image
 import re
 import logging
+from itertools import batched
 
+import tyro
 import torch as th
 from torchvision.transforms.functional import to_tensor, resize
-from joblib import Parallel, delayed
-from tqdm import tqdm
+from torchvision.utils import save_image
+from tqdm import tqdm, trange
 from pycocotools.mask import decode
 from transformers.pipelines import pipeline
 from transformers.pipelines.depth_estimation import DepthEstimationPipeline
 from transformers.pipelines.text_generation import TextGenerationPipeline
 from transformers.models.auto.processing_auto import AutoProcessor
+from transformers.models.auto.image_processing_auto import AutoImageProcessor
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from controlnet_aux.processor import HEDdetector
-from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.models.controlnets.controlnet import ControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet_inpaint_sd_xl import StableDiffusionXLControlNetInpaintPipeline
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 
 from src.generative_augmentations.datasets.coco import index_to_name
+from src.generative_augmentations.config import Config
 
 
 # TODO:
@@ -40,24 +43,34 @@ from src.generative_augmentations.datasets.coco import index_to_name
 #     Store in a way that is tied to bounding box
 
 
-
+logger = logging.getLogger(__name__)
 
 
 class VariantGeneration:
-    def __init__(self, input_dir: Path, output_dir: Path | None = None, num_variants: int = 3, num_workers: int = -4, device: th.device | None = None) -> None:
+    def __init__(
+        self,
+        input_dir: Path,
+        output_dir: Path | None = None,
+        num_variants: int = 3,
+        bbox_min_side_length: int = 75,
+        device: th.device | None = None
+    ) -> None:
         self.input_dir = input_dir
         self.output_dir = output_dir if output_dir else input_dir
         self.num_variants = num_variants
+        self.bbox_min_side_length = bbox_min_side_length
 
-        self.num_workers = num_workers
         self.device = device if device else th.device("cuda" if th.cuda.is_available() else "cpu")
         self.dtype = th.bfloat16 if th.cuda.is_available() else th.float32
+
+        logger.info(f"Loading models...")
 
         # Based upon: https://arxiv.org/abs/2406.09414
         self.depth_model = self._get_depth_model()
         # Based upon: https://arxiv.org/abs/2302.05543
         self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
         # Based upon: https://arxiv.org/abs/2311.06242
+        # TODO: Figure out why florence is so slow at loading initially
         self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
         self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
         # Based upon: https://arxiv.org/abs/2407.10671
@@ -65,7 +78,10 @@ class VariantGeneration:
         # Based upon: https://arxiv.org/abs/2307.01952
         self.diffusion_model = self._get_diffusion_model()
         
+        logger.info(f"Loaded models")
 
+
+        # Load names of image directories
         with open(self.input_dir / "image_names.txt", 'r') as file:
             self.img_dirs = file.readline().strip().split(" ")
 
@@ -79,7 +95,18 @@ class VariantGeneration:
         # Get depth model pipeline
         pipe = cast(
             DepthEstimationPipeline,
-            pipeline(task="depth-estimation", model="depth-anything/Depth-Anything-V2-Large-hf", device_map=self.device)
+            pipeline(
+                task="depth-estimation",
+                model="depth-anything/Depth-Anything-V2-Large-hf",
+                device_map=self.device,
+                image_processor=AutoImageProcessor.from_pretrained(
+                    "depth-anything/Depth-Anything-V2-Large-hf",
+                    _from_pipeline="depth-estimation", 
+                    device_map=self.device,
+                    torch_dtype=self.dtype,
+                    use_fast=False,
+                )
+            )
         )
 
         # Reset logger level
@@ -128,6 +155,8 @@ class VariantGeneration:
             vae=vae,
             torch_dtype=self.dtype
         ).to(self.device)
+        
+        diffusion_model.set_progress_bar_config(disable=True)
 
         # self.diffusion_model.enable_model_cpu_offload()
 
@@ -184,7 +213,7 @@ class VariantGeneration:
             # Generate prompt
             # NOTE: You have no idea how long it took me to prompt engineer this
             instructions = [
-                {"role": "system", "content": "You are strictly a text model part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program. You must provide MULTIPLE reformulations as a Python list of strings. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change up the colors and lighting in the reformulations."},
+                {"role": "system", "content": "You are strictly a text model part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change up the colors and lighting in the reformulations."},
                 {"role": "user", "content": description},
             ]
 
@@ -197,7 +226,7 @@ class VariantGeneration:
 
 
         # Take the first num_variants, prepend the label and return the prompt
-        return [f"The image depicts: {label}. {prompt}" for prompt in prompts[:self.num_variants]]
+        return [f"The photo depicts: {label}. {prompt}" for prompt in prompts[:self.num_variants]]
 
 
     def _generate_inpaint(self, img: th.Tensor, mask: th.Tensor, depths: th.Tensor, edges: th.Tensor, prompt: str) -> th.Tensor:
@@ -222,7 +251,10 @@ class VariantGeneration:
 
 
     def generate_variants(self, img_dir: Path) -> None:
+        # Load image and annotations
         # TODO: Save everything as a dict of tensors/strings/lists to avoid weights_only=False
+        img = Image.open(img_dir / "img.png")
+
         annotations = th.load(img_dir / "anno.pth", weights_only=False)
         h, w = annotations["img_shape"]
         bboxes = annotations["boxes"]
@@ -230,24 +262,42 @@ class VariantGeneration:
         labels = annotations["labels"]
 
 
-        img = Image.open(img_dir / "img.png")
+        # Prepare output files
+        output_img_dir = self.output_dir / img_dir.name
+        output_img_dir.mkdir(parents=True, exist_ok=True)
+        variant_dir = output_img_dir / "variants"
+        variant_dir.mkdir(parents=True, exist_ok=True)
+        
+        metadata_file = output_img_dir / "variants.txt"
+        metadata_file.write_text("")
+
+
+        # Estimate depth and edges for ControlNet
         depths = self._estimate_depth(img)
         edges = self._estimate_edges(img)
         img = to_tensor(img).to(self.device)
 
-        for instance_idx in range(len(bboxes)):
+
+        # Generate variants for each instance
+        for instance_idx in (pbar := trange(len(bboxes), leave=False)):
+            # Bounding box for instance
+            pbar.set_description(f"Instance - Setup")
+            x1, y1, x2, y2 = bboxes[instance_idx]
+            context_factor = 0.05
+
+            # If instance is small, skip it
+            if (x2 - x1) < self.bbox_min_side_length or (y2 - y1) < self.bbox_min_side_length:
+                continue
+
             # Decode instance segmentation mask
             mask = th.tensor(decode(masks[instance_idx]), dtype=self.dtype).to(self.device)
 
             # Mean depth to determine draw order
             depth_instance = (depths[instance_idx] * mask).sum() / (mask.sum() + 1e-6)
 
-            # Bounding box for instance
-            x1, y1, x2, y2 = bboxes[instance_idx]
-            context_factor = 0.05
-
             # Get initial base prompt
             # NOTE: Expanding the bounding box to give some context
+            pbar.set_description(f"Instance - Describing")
             prompt_base = self._describe_object(
                 img[
                     :,
@@ -257,35 +307,43 @@ class VariantGeneration:
             )
 
             # Reforumlate prompt into multiple variants
+            pbar.set_description(f"Instance - Prompting")
             prompts = self._generate_prompts(prompt_base, index_to_name[labels[instance_idx].item()])
 
 
-
-            for variant_idx in range(self.num_variants):
+            # Generate variants
+            pbar.set_description(f"Instance - Inpainting")
+            for variant_idx in trange(self.num_variants, desc="Variant", leave=False):
+                # Inpaint segmentation
                 variant = self._generate_inpaint(img, mask, depths, edges, prompts[variant_idx])
                 
-                import matplotlib.pyplot as plt
-                plt.imshow(variant.permute(1, 2, 0).cpu().float().numpy())
-                plt.show()
-                
-            # TODO: Remember to store the instance depth value
-            # TODO: Disable all those annoying log messages
-            # TODO: Figure out why florence is so slow at loading initially
+                # Crop to bounding box and save variant
+                crop = variant[:, y1:y2, x1:x2].to(device=th.device("cpu"), dtype=th.float32)
+                variant_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
+                save_image(crop, str(variant_file))
+
+                # Save metadata
+                with open(metadata_file, 'a') as file:
+                    file.write(f"{instance_idx} {variant_idx} {depth_instance.item()} {variant_dir.relative_to(self.output_dir)}\n")
 
 
-    def run(self) -> None:
-        pass
-        # TODO: Run stuff in parallel, process all images
-        # TODO: Pretty progress bars
+
+    def run(self, start: int | float = 0.0, end: int | float = 1.0) -> None:
+        if isinstance(start, float):
+            start = int(start * len(self.img_dirs))
+        if isinstance(end, float):
+            end = int(end * len(self.img_dirs))
+
+        for img_dir in (pbar := tqdm(self.img_dirs[start:end])):
+            pbar.set_description(f"Processing - {img_dir}")
+            self.generate_variants(self.input_dir / img_dir)
+
 
 
 if __name__ == "__main__":
-    variant_gen = VariantGeneration(
-        input_dir=Path("data/processed/train"),
-        num_variants=3,
-        num_workers=-4,
-    )
+    args = tyro.cli(Config)
 
-    # variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[5])
-    variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[6])
-    variant_gen.generate_variants(variant_gen.input_dir / variant_gen.img_dirs[7])
+    VariantGeneration(
+        input_dir=Path(args.dataloader.processed_data_dir) / "train",
+        num_variants=3
+    ).run(start=0.0, end=1.0)
