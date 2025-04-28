@@ -4,6 +4,7 @@ from PIL import Image
 import re
 import logging
 from itertools import batched
+import shutil
 
 import tyro
 import torch as th
@@ -266,6 +267,9 @@ class VariantGeneration:
         output_img_dir = self.output_dir / img_dir.name
         output_img_dir.mkdir(parents=True, exist_ok=True)
         variant_dir = output_img_dir / "variants"
+        # TODO remove only for error handling the runs that crashed 
+        if variant_dir.exists(): 
+            return 
         variant_dir.mkdir(parents=True, exist_ok=True)
         
         metadata_file = output_img_dir / "variants.txt"

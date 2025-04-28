@@ -1,5 +1,6 @@
 from typing import cast
 import types
+import matplotlib.pyplot as plt
 
 import torch as th
 import torchvision as tv 
@@ -22,6 +23,7 @@ class DeepLabv3Lightning(LightningModule):
         learning_rate_warmup_max: float,
         learning_rate_warmup_steps: int,
         weight_decay: float,
+        log_image_every_n_epoch: int = 10,
         pretrained_backbone: bool = True, 
         num_classes: int = 81
     ) -> None:
@@ -35,6 +37,7 @@ class DeepLabv3Lightning(LightningModule):
         self.learning_rate_warmup_max = learning_rate_warmup_max
         self.learning_rate_warmup_steps = learning_rate_warmup_steps
         self.weight_decay = weight_decay
+        self.log_image_every_n_epoch = log_image_every_n_epoch
         
         self.model: th.nn.Module = tv.models.segmentation.deeplabv3_resnet50(num_classes=num_classes)
         self.forward = self.model.forward
@@ -74,14 +77,15 @@ class DeepLabv3Lightning(LightningModule):
         self.log('val_loss', loss)
 
 
-        if batch_idx == 0: 
+        if batch_idx == 0 and self.current_epoch % self.log_image_every_n_epoch == 0: 
             log_images = []
             for i, image in enumerate(images): 
                 fig = plot_segmentation(image=image, target=targets[i], detection=pred_segmentations[i])
                 log_images.append(wandb.Image(fig))
+                plt.close(fig) #TODO: Check that this works 
             
             self.logger.log_image(key="Instance Segmentations", images=log_images)
-        
+            # plt.close('all') 
         # # Average Precision 
         # mAP = average_precision(targets=targets, detections=detections)
         # self.log('val_map', mAP)

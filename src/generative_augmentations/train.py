@@ -55,7 +55,7 @@ def main(config: Config) -> int:
         callbacks=[
             LearningRateMonitor(logging_interval="step"),
             ModelCheckpoint(
-                dirpath="models/{logger.experiment.name}:{logger.experiment.hash}/",
+                dirpath="{config.artifact.modeldir}/models/{logger.experiment.name}:{logger.experiment.hash}/",
                 filename=f"{logger.experiment.id}" + ":top:{epoch:02d}:{step}:{val_loss:.3f}",
                 every_n_train_steps=config.artifact.checkpoint_save_every_n_steps,
                 save_top_k=config.artifact.checkpoint_save_n_best,
@@ -91,6 +91,7 @@ def main(config: Config) -> int:
         learning_rate_mult_period=config.model.learning_rate_mult_period,
         learning_rate_warmup_max=config.model.learning_rate_warmup_max,
         learning_rate_warmup_steps=config.model.learning_rate_warmup_steps,
+        log_image_every_n_epoch=config.artifact.log_image_every_n_epoch,
         weight_decay=config.model.weight_decay,
         pretrained_backbone=config.model.pretrained_backbone,
         num_classes=81

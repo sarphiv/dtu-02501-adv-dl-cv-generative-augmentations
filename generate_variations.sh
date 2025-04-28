@@ -1,5 +1,5 @@
 #!/bin/bash
-#BSUB -J gen_aug_adlcv[1-64]
+#BSUB -J gen_aug_adlcv[47-52]
 #BSUB -q gpua10
 #BSUB -W 12:00
 #BSUB -R "rusage[mem=5GB]"

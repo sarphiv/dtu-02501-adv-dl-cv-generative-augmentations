@@ -57,6 +57,7 @@ class COCODataset(Dataset):
         #     segmentation_mask[int(label)][masks_full[i].to(bool)] = 1
         for a in area:
             segmentation_mask[masks_full[a].to(bool)]  = int(class_labels[a]) 
+            # new_image[masks_full] = patch 
         # for (c, m) in zip(class_labels, masks_full): 
         #     segmentation_mask[m.to(bool)] = int(c) + 1
 

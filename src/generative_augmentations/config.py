@@ -9,7 +9,9 @@ class ArtifactConfig:
     project_name: str = "generative-augmentations"
     experiment_name: str | None = None
     wandb_entity: str = "metrics_logger"
+    modeldir: str = ""
 
+    log_image_every_n_epoch: int = 10
     checkpoint_save_n_best: int = 1
     checkpoint_save_every_n_steps: int = 10000
 
