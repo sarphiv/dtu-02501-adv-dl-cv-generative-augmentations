@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import tyro
 
@@ -24,12 +25,12 @@ class VarientGenerationConfig:
 
 @dataclass
 class DataloaderConfig:
-    processed_data_dir: str = "data/processed"
+    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
 
     num_workers: int = 8
     batch_size: int = 32
     data_fraction: float = 1.0
-    data_dir: str = "data/processed"
+    data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
 
 
 

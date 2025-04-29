@@ -3,8 +3,7 @@ from pathlib import Path
 from PIL import Image
 import re
 import logging
-from itertools import batched
-import shutil
+import warnings
 
 import tyro
 import torch as th
@@ -19,7 +18,9 @@ from transformers.pipelines.text_generation import TextGenerationPipeline
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.image_processing_auto import AutoImageProcessor
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
-from controlnet_aux.processor import HEDdetector
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    from controlnet_aux.processor import HEDdetector
 from diffusers.models.controlnets.controlnet import ControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet_inpaint_sd_xl import StableDiffusionXLControlNetInpaintPipeline
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -46,6 +47,9 @@ from src.generative_augmentations.config import Config
 
 
 logger = logging.getLogger(__name__)
+
+
+th.set_float32_matmul_precision("medium")
 
 
 class VariantGeneration:
@@ -139,7 +143,7 @@ class VariantGeneration:
         # Get depth model pipeline
         pipe = cast(
             TextGenerationPipeline,
-            pipeline(task="text-generation", model="Qwen/Qwen2-1.5B-Instruct", torch_dtype=self.dtype, device_map=self.device)
+            pipeline(task="text-generation", model="Qwen/Qwen3-1.7B", torch_dtype=self.dtype, device_map=self.device)
         )
 
         # Reset logger level
@@ -157,8 +161,8 @@ class VariantGeneration:
         )
         controlnet_edge = ControlNetModel.from_pretrained(
             "SargeZT/controlnet-sd-xl-1.0-softedge-dexined",
-            # "diffusers/controlnet-canny-sdxl-1.0",
             torch_dtype=self.dtype,
+            use_safetensors=False,
         )
         
         vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=self.dtype)
@@ -171,9 +175,12 @@ class VariantGeneration:
         )
 
         diffusion_model.set_progress_bar_config(disable=True)
-        diffusion_model.enable_model_cpu_offload()
 
-        # return diffusion_model.to(self.device)
+        diffusion_model.enable_model_cpu_offload()
+        diffusion_model.enable_xformers_memory_efficient_attention()
+        # diffusion_model.to(self.device, dtype=self.dtype)
+
+
         return diffusion_model
 
 
@@ -224,16 +231,27 @@ class VariantGeneration:
             # Generate prompt
             # NOTE: You have no idea how long it took me to prompt engineer this
             instructions = [
-                {"role": "system", "content": "You are strictly a text model part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change up the colors and lighting in the reformulations."},
-                {"role": "user", "content": description},
+                {"role": "system", "content": "You are strictly a text model assistant part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program with a focus on describing the primary subject. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change colors, lighting, textures, or other details on the primary subject in the reformulations."},
+                {"role": "user", "content": f"The photo's primary subject is: {label}. " + description},
             ]
 
-            # Prompt model to give more descriptions
-            outputs = self.prompt_model(instructions, max_new_tokens=256, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+            with th.inference_mode():
+                # Prompt model to give more descriptions
+                outputs = self.prompt_model(instructions, max_new_tokens=16384, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+
+            # Retrieve output
+            output = cast(str, outputs[0]["generated_text"][-1]['content']) # pyright: ignore[ reportArgumentType, reportIndexIssue, reportOptionalSubscript ]
+            
+            # Find end of thinking process
+            thinking_end_idx = output.rfind("</think>")
+
+            # If no thinking, retry
+            if thinking_end_idx == -1:
+                continue
 
             # Parse output
-            output: str = cast(str, outputs[0]["generated_text"][-1]['content'].strip().strip("[]'\"")) # type: ignore
-            prompts.extend(re.split(r"[\"\'],[ \n]*[\"\']", output))
+            output: str = output[thinking_end_idx+8:].strip().strip("[]'\"")
+            prompts.extend(re.split(r"[\"\']\]?,?[ \n]*\[?[\"\']", output))
 
 
         # Take the first num_variants, prepend the label and return the prompt
@@ -245,18 +263,19 @@ class VariantGeneration:
         depths = (depths - depth_min) / (depth_max - depth_min)
         edges = resize(edges, list(depths.shape))
 
-        variant = self.diffusion_model(
-            prompt=prompt,
-            negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
-            num_inference_steps=20,
-            eta=1.0,
-            image=img,
-            mask_image=mask,
-            control_image=[depths[None, None].repeat(1, 3, 1, 1), edges[None]],
-            strength=1.0,
-            controlnet_conditioning_scale=[0.9, 0.5],
-            guidance_scale=7.5,
-        ).images[0] # type: ignore
+        with th.inference_mode():
+            variant = self.diffusion_model(
+                prompt=prompt,
+                negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
+                num_inference_steps=20,
+                eta=1.0,
+                image=img,
+                mask_image=mask,
+                control_image=[depths[None, None].repeat(1, 3, 1, 1), edges[None]],
+                strength=1.0,
+                controlnet_conditioning_scale=[0.9, 0.5],
+                guidance_scale=7.5,
+            ).images[0] # type: ignore
 
         return resize(to_tensor(variant).to(self.device, dtype=self.dtype), [img.shape[1], img.shape[2]])
 
@@ -339,8 +358,14 @@ class VariantGeneration:
                 
                 # Crop to bounding box and save variant
                 crop = variant[:, y1:y2, x1:x2].to(device=th.device("cpu"), dtype=th.float32)
-                variant_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
-                save_image(crop, str(variant_file))
+                variant_image_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
+                variant_prompt_file = variant_dir / f"{instance_idx}_{variant_idx}.txt"
+
+                save_image(crop, str(variant_image_file))
+
+                # Save prompt
+                with open(variant_prompt_file, 'w') as file:
+                    file.write(prompts[variant_idx])
 
                 # Save metadata
                 with open(metadata_file, 'a') as file:
