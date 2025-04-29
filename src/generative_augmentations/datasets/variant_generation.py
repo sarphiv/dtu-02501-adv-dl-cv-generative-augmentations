@@ -12,6 +12,7 @@ from torchvision.transforms.functional import to_tensor, resize
 from torchvision.utils import save_image
 from tqdm import tqdm, trange
 from pycocotools.mask import decode
+from transformers.models.paligemma import PaliGemmaForConditionalGeneration
 from transformers.pipelines import pipeline
 from transformers.pipelines.depth_estimation import DepthEstimationPipeline
 from transformers.pipelines.text_generation import TextGenerationPipeline
@@ -72,8 +73,9 @@ class VariantGeneration:
         self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
         # Based upon: https://arxiv.org/abs/2311.06242
         # TODO: Figure out why florence is so slow at loading initially
-        self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
-        self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+        # self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
+        # self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+        self.vqa_model, self.vqa_model_tokenizer = self._get_vqa_model()
         # Based upon: https://arxiv.org/abs/2407.10671
         self.prompt_model = self._get_prompt_model()
         # Based upon: https://arxiv.org/abs/2307.01952
@@ -86,6 +88,19 @@ class VariantGeneration:
         with open(self.input_dir / "image_names.txt", 'r') as file:
             self.img_dirs = file.readline().strip().split(" ")
 
+    def _get_vqa_model(self) -> tuple[PaliGemmaForConditionalGeneration, AutoProcessor]: 
+        # Get the model 
+        model_id = "google/paligemma-3b-ft-cococap-448"
+        vqa_model = PaliGemmaForConditionalGeneration.from_pretrained(
+            model_id, 
+            torch_dtype=self.dtype, 
+            device_map=self.device, 
+            revision="bfloat16"
+        ).eval()
+
+        vqa_tokenizer = AutoProcessor.from_pretrained(model_id)
+        return vqa_model, vqa_tokenizer
+        
 
     def _get_depth_model(self) -> DepthEstimationPipeline:
         # Remove info logging
@@ -178,28 +193,26 @@ class VariantGeneration:
         #  In such a case, maybe cut out the instance via the mask first.
         
         # Prepare prompt
-        prompt = "<MORE_DETAILED_CAPTION>"
+        prompt = "caption en"
         inputs = self.vqa_model_tokenizer(
             text=prompt,
             images=img * 255.0,
             return_tensors="pt"
         ).to(self.vqa_model.device, self.vqa_model.dtype)
 
-        # Generate description
-        generated_ids = self.vqa_model.generate(
-            input_ids=inputs["input_ids"],
-            pixel_values=inputs["pixel_values"],
-            max_new_tokens=32,
-            num_beams=3
-        )
+        inputs_len = inputs['input_ids'].shape[-1]
 
-        # Decode and parse answer
-        outputs = self.vqa_model_tokenizer.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        description = self.vqa_model_tokenizer.post_process_generation(
-            outputs,
-            task=prompt,
-            image_size=img.shape[1:]
-        )["<MORE_DETAILED_CAPTION>"]
+        with th.inference_mode():
+            # Generate description
+            generated_ids = self.vqa_model.generate(
+                **inputs,
+                max_new_tokens=32, 
+                du_sample=False
+            )
+
+            # Decode and parse answer
+            outputs = generated_ids[0][inputs_len:]
+            description = self.vqa_model_tokenizer.decode(outputs, skip_special_tokens=True)
 
 
         # Pray to the AI overloads that the description is not malformed or incorrect
@@ -248,7 +261,7 @@ class VariantGeneration:
             guidance_scale=7.5,
         ).images[0] # type: ignore
 
-        return to_tensor(variant).to(self.device, dtype=self.dtype)
+        return resize(to_tensor(variant).to(self.device, dtype=self.dtype), (img.shape[1], img.shape[2]))
 
 
     def generate_variants(self, img_dir: Path) -> None:
@@ -262,14 +275,20 @@ class VariantGeneration:
         masks = annotations["masks"]
         labels = annotations["labels"]
 
+        # Ensure that overlap of masks are accounted for 
+        new_mask = th.zeros((h,w), dtype=th.long)-1
+        idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
+        for i in idx_areas: 
+            new_mask[masks[i].bool()] = i
+        
+        for i in range(len(masks)): 
+            masks[i] = new_mask==i
+
 
         # Prepare output files
         output_img_dir = self.output_dir / img_dir.name
         output_img_dir.mkdir(parents=True, exist_ok=True)
         variant_dir = output_img_dir / "variants"
-        # TODO remove only for error handling the runs that crashed 
-        if variant_dir.exists(): 
-            return 
         variant_dir.mkdir(parents=True, exist_ok=True)
         
         metadata_file = output_img_dir / "variants.txt"
