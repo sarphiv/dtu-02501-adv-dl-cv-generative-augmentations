@@ -207,7 +207,7 @@ class VariantGeneration:
             generated_ids = self.vqa_model.generate(
                 **inputs,
                 max_new_tokens=32, 
-                du_sample=False
+                do_sample=False
             )
 
             # Decode and parse answer
@@ -275,14 +275,14 @@ class VariantGeneration:
         masks = annotations["masks"]
         labels = annotations["labels"]
 
-        # Ensure that overlap of masks are accounted for 
-        new_mask = th.zeros((h,w), dtype=th.long)-1
-        idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
-        for i in idx_areas: 
-            new_mask[masks[i].bool()] = i
+        # # Ensure that overlap of masks are accounted for 
+        # new_mask = th.zeros((h,w), dtype=th.long)-1
+        # idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
+        # for i in idx_areas: 
+        #     new_mask[masks[i].bool()] = i
         
-        for i in range(len(masks)): 
-            masks[i] = new_mask==i
+        # for i in range(len(masks)): 
+        #     masks[i] = new_mask==i
 
 
         # Prepare output files
