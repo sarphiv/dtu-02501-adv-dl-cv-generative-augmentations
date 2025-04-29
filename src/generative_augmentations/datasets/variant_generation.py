@@ -71,10 +71,7 @@ class VariantGeneration:
         self.depth_model = self._get_depth_model()
         # Based upon: https://arxiv.org/abs/2302.05543
         self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
-        # Based upon: https://arxiv.org/abs/2311.06242
-        # TODO: Figure out why florence is so slow at loading initially
-        # self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
-        # self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+        # Based upon: https://arxiv.org/abs/2407.07726
         self.vqa_model, self.vqa_model_tokenizer = self._get_vqa_model()
         # Based upon: https://arxiv.org/abs/2407.10671
         self.prompt_model = self._get_prompt_model()
@@ -88,19 +85,6 @@ class VariantGeneration:
         with open(self.input_dir / "image_names.txt", 'r') as file:
             self.img_dirs = file.readline().strip().split(" ")
 
-    def _get_vqa_model(self) -> tuple[PaliGemmaForConditionalGeneration, AutoProcessor]: 
-        # Get the model 
-        model_id = "google/paligemma-3b-ft-cococap-448"
-        vqa_model = PaliGemmaForConditionalGeneration.from_pretrained(
-            model_id, 
-            torch_dtype=self.dtype, 
-            device_map=self.device, 
-            revision="bfloat16"
-        ).eval()
-
-        vqa_tokenizer = AutoProcessor.from_pretrained(model_id)
-        return vqa_model, vqa_tokenizer
-        
 
     def _get_depth_model(self) -> DepthEstimationPipeline:
         # Remove info logging
@@ -130,6 +114,20 @@ class VariantGeneration:
 
         # Return pipeline
         return pipe
+
+
+    def _get_vqa_model(self) -> tuple[PaliGemmaForConditionalGeneration, AutoProcessor]: 
+        # Get the model 
+        model_id = "google/paligemma2-3b-mix-224"
+        vqa_model = PaliGemmaForConditionalGeneration.from_pretrained(
+            model_id, 
+            torch_dtype=self.dtype, 
+            device_map=self.device
+        ).eval()
+
+        vqa_tokenizer = AutoProcessor.from_pretrained(model_id)
+
+        return vqa_model, vqa_tokenizer
 
 
     def _get_prompt_model(self) -> TextGenerationPipeline:
@@ -170,12 +168,12 @@ class VariantGeneration:
             controlnet=[controlnet_depth, controlnet_edge],
             vae=vae,
             torch_dtype=self.dtype
-        ).to(self.device)
-        
+        )
+
         diffusion_model.set_progress_bar_config(disable=True)
+        diffusion_model.enable_model_cpu_offload()
 
-        # self.diffusion_model.enable_model_cpu_offload()
-
+        # return diffusion_model.to(self.device)
         return diffusion_model
 
 
@@ -193,13 +191,12 @@ class VariantGeneration:
         #  In such a case, maybe cut out the instance via the mask first.
         
         # Prepare prompt
-        prompt = "caption en"
-        inputs = self.vqa_model_tokenizer(
+        prompt = "<image>describe en"
+        inputs = self.vqa_model_tokenizer( # pyright: ignore[ reportCallIssue ]
             text=prompt,
             images=img * 255.0,
             return_tensors="pt"
         ).to(self.vqa_model.device, self.vqa_model.dtype)
-
         inputs_len = inputs['input_ids'].shape[-1]
 
         with th.inference_mode():
@@ -212,7 +209,7 @@ class VariantGeneration:
 
             # Decode and parse answer
             outputs = generated_ids[0][inputs_len:]
-            description = self.vqa_model_tokenizer.decode(outputs, skip_special_tokens=True)
+            description = self.vqa_model_tokenizer.decode(outputs, skip_special_tokens=True) # pyright: ignore[ reportAttributeAccessIssue ]
 
 
         # Pray to the AI overloads that the description is not malformed or incorrect
@@ -261,7 +258,7 @@ class VariantGeneration:
             guidance_scale=7.5,
         ).images[0] # type: ignore
 
-        return resize(to_tensor(variant).to(self.device, dtype=self.dtype), (img.shape[1], img.shape[2]))
+        return resize(to_tensor(variant).to(self.device, dtype=self.dtype), [img.shape[1], img.shape[2]])
 
 
     def generate_variants(self, img_dir: Path) -> None:
