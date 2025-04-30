@@ -275,14 +275,15 @@ class VariantGeneration:
         masks = annotations["masks"]
         labels = annotations["labels"]
 
-        # # Ensure that overlap of masks are accounted for 
-        # new_mask = th.zeros((h,w), dtype=th.long)-1
-        # idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
-        # for i in idx_areas: 
-        #     new_mask[masks[i].bool()] = i
+        # Ensure that overlap of masks are accounted for 
+        new_mask = th.zeros((h,w), dtype=th.long, device=self.device)-1
+        masks = [th.tensor(decode(mask), dtype=self.dtype).to(self.device) for mask in masks]
+        idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
+        for i in idx_areas: 
+            new_mask[masks[i].bool()] = i
         
-        # for i in range(len(masks)): 
-        #     masks[i] = new_mask==i
+        for i in range(len(masks)): 
+            masks[i] = new_mask==i
 
 
         # Prepare output files
@@ -313,7 +314,8 @@ class VariantGeneration:
                 continue
 
             # Decode instance segmentation mask
-            mask = th.tensor(decode(masks[instance_idx]), dtype=self.dtype).to(self.device)
+            mask = mask[instance_idx]
+            # mask = th.tensor(decode(masks[instance_idx]), dtype=self.dtype).to(self.device)
 
             # Mean depth to determine draw order
             depth_instance = (depths[instance_idx] * mask).sum() / (mask.sum() + 1e-6)
