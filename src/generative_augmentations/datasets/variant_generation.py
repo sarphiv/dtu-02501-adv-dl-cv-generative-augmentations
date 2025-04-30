@@ -293,13 +293,13 @@ class VariantGeneration:
 
         # Ensure that overlap of masks are accounted for 
         new_mask = th.zeros((h,w), dtype=th.long, device=self.device)-1
-        masks = [th.tensor(decode(mask), dtype=self.dtype).to(self.device) for mask in masks]
+        masks = [th.tensor(decode(mask), dtype=th.bool, device=self.device) for mask in masks]
         idx_areas = th.tensor([mask.sum().item() for mask in masks]).argsort(descending=True)
         for i in idx_areas: 
-            new_mask[masks[i].bool()] = i
+            new_mask[masks[i]] = i
         
-        for i in range(len(masks)): 
-            masks[i] = new_mask==i
+        for i in range(len(masks)):
+            masks[i] = (new_mask==i).to(device=self.device, dtype=self.dtype)
 
 
         # Prepare output files
