@@ -13,7 +13,7 @@ from src.generative_augmentations.config import Config
 from src.generative_augmentations.models.deeplab import DeepLabv3Lightning
 from src.generative_augmentations.datasets.datamodule import COCODataModule
 
-my_aug = A.Compose(
+advanced_aug = A.Compose(
     [
         A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
         A.VerticalFlip(p=0.5),
@@ -26,7 +26,20 @@ my_aug = A.Compose(
         ToTensorV2()
     ]
 )
-my_trans = A.Compose(
+simple_aug = A.Compose(
+    [
+        A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.HorizontalFlip(p=0.5),
+        A.Rotate(limit=45, border_mode=0, p=0.5),  
+        A.RandomCropFromBorders(crop_bottom=0.3, crop_left=0.3, crop_right=0.3, crop_top=0.3),
+        A.Resize(224, 224),
+        A.Normalize(mean=(0.485, 0.456, 0.406),
+                    std=(0.229, 0.224, 0.225)),
+        ToTensorV2()
+    ]
+)
+no_aug = A.Compose(
     [
         A.Resize(224, 224),
         A.Normalize(mean=(0.485, 0.456, 0.406),
@@ -49,12 +62,29 @@ def main(config: Config) -> int:
 
     logger.experiment.config.update(config)
 
+    diffusion_aug = None 
+    instance_aug = None
+    if config.dataloader.augmentations == "no": 
+        augmentations = no_aug
+    elif config.dataloader.augmentations == "simple": 
+        augmentations = simple_aug
+    elif config.dataloader.augmentations == "advanced": 
+        augmentations = advanced_aug 
+    elif config.dataloader.augmentations == "diffusion": 
+        augmentations = simple_aug 
+        diffusion_aug = 0.3
+    elif config.dataloader.augmentations == "instance": 
+        augmentations = simple_aug 
+        instance_aug = 0.3 
+
 
     # Set up data
     datamodule = COCODataModule(num_workers=config.dataloader.num_workers,
                                 batch_size=config.dataloader.batch_size,
-                                transform=my_trans,
-                                augmentations=my_aug, 
+                                transform=no_aug,
+                                augmentations=augmentations, 
+                                diffusion_aug=diffusion_aug, 
+                                instance_aug=instance_aug,
                                 data_fraction=config.dataloader.data_fraction,
                                 data_dir=Path(config.dataloader.data_dir))
 
@@ -70,7 +100,7 @@ def main(config: Config) -> int:
             LearningRateMonitor(logging_interval="step"),
             ModelCheckpoint(
                 dirpath=f"{config.artifact.modeldir}/models/{logger.experiment.name}/",
-                filename=f"{logger.experiment.id}" + ":top:{epoch:02d}:{step}:{val_loss:.3f}",
+                filename=f"{logger.experiment.id}" + "_top_{epoch:02d}_{step}_{val_loss:.3f}",
                 every_n_train_steps=config.artifact.checkpoint_save_every_n_steps,
                 save_top_k=config.artifact.checkpoint_save_n_best,
                 mode="min",
