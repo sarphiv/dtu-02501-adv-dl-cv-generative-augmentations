@@ -10,7 +10,7 @@ from pytorch_optimizer import create_optimizer
 import wandb
 
 from src.generative_augmentations.utils.plotting import plot_segmentation
-from src.generative_augmentations.utils.map import average_precision
+from src.generative_augmentations.utils.metrics import compute_metrics
 
 
 class DeepLabv3Lightning(LightningModule):
@@ -72,9 +72,18 @@ class DeepLabv3Lightning(LightningModule):
         pred_segmentations = outputs['out'] 
         gt_segmentations = th.stack([targets[i]['semantic_mask'] for i in range(len(targets))])
         loss = self.criterion(pred_segmentations, gt_segmentations)
-        
+
+        # Evaluate IoU, dice, precision, specificity, sensitivity and accuracy  
+        iou, dice, precision, specificity, sensitivity, accuracy = compute_metrics(pred_segmentations, gt_segmentations)
+    
         # TODO: Logging
         self.log('val_loss', loss)
+        self.log('val_iou', iou)
+        self.log('val_dice', dice)
+        self.log('val_precision', precision)
+        self.log('val_specificity', specificity)
+        self.log('val_sensitivity', sensitivity)
+        self.log('val_accuracy', accuracy)
 
 
         if batch_idx == 0 and self.current_epoch % self.log_image_every_n_epoch == 0: 

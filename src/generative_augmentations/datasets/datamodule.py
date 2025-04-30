@@ -1,23 +1,84 @@
 from pathlib import Path 
 from typing import Callable
+from collections import defaultdict
 
 import lightning as pl
+import numpy as np
 import torch as th 
 from torch.utils.data import Dataset, DataLoader, Subset
 import cv2 
 from pycocotools.mask import decode
 from torchvision import tv_tensors
+from torchvision.transforms.functional import resize
 
 def collate_img_anno(batch): 
     images = th.stack([item[0] for item in batch])
     annotations = [item[1] for item in batch]
     return images, annotations
 
-class COCODataset(Dataset): 
-    def __init__(self, path: Path, transform=None, include_original_image=False) -> None: 
+# class COCODataset(Dataset): 
+#     def __init__(self, path: Path, transform=None, include_original_image=False) -> None: 
+#         super().__init__()
+#         self.path = path 
+#         self.transform = transform
+#         self.include_original_image = include_original_image
+#         with open(path / 'image_names.txt', 'r') as file:
+#             line = file.readline().strip()
+#         self.folders = line.split(' ')
+    
+#     def __len__(self): 
+#         return len(self.folders)
+    
+#     def __getitem__(self, i): 
+#         folder = self.folders[i]
+#         img = cv2.imread(self.path / (folder + "/img.png"))
+#         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#         annotations = th.load(self.path / (folder + "/anno.pth"), weights_only=False)
+        
+#         masks = annotations["masks"]
+#         masks_full = [decode(mask) for mask in masks]
+#         boxes = annotations['boxes']
+#         class_labels = annotations['labels'].numpy()
+
+#         if self.include_original_image: annotations['image'] = img
+#         if self.transform:
+#             augmented = self.transform(
+#                 image=img,
+#                 masks=masks_full,
+#                 bboxes=boxes,
+#                 class_labels=annotations['labels'].numpy()
+#             )
+#             img = augmented['image']
+#             masks_full = th.stack(augmented['masks'])
+#             boxes = augmented['bboxes']
+#             class_labels = augmented['class_labels']
+        
+#         area = th.tensor([mask.sum() for mask in masks_full]).argsort(descending=True)
+
+#         segmentation_mask = th.zeros_like(masks_full[0], dtype=th.long) + 80# th.zeros(80, *masks_full[0].shape) # TODO: How do we collapse classes? Is the order here the draw order. 
+#         # for i, label in enumerate(class_labels):
+#         #     segmentation_mask[int(label)][masks_full[i].to(bool)] = 1
+#         for a in area:
+#             segmentation_mask[masks_full[a].to(bool)]  = int(class_labels[a]) 
+#             # new_image[masks_full] = patch 
+#         # for (c, m) in zip(class_labels, masks_full): 
+#         #     segmentation_mask[m.to(bool)] = int(c) + 1
+
+#         annotations['img_shape'] = (img.shape[1], img.shape[2])
+#         annotations['masks'] = tv_tensors.Mask(data=masks_full)
+#         annotations['semantic_mask'] = segmentation_mask
+#         annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
+#         annotations['labels'] = th.tensor(class_labels.astype(int))
+    
+#         return img, annotations
+
+class COCODatasetv2(Dataset): 
+    def __init__(self, path: Path, transform=None, diffusion_aug=None, instance_aug=None, include_original_image=False) -> None: 
         super().__init__()
         self.path = path 
         self.transform = transform
+        self.diffusion_aug = diffusion_aug
+        self.instance_aug = instance_aug
         self.include_original_image = include_original_image
         with open(path / 'image_names.txt', 'r') as file:
             line = file.readline().strip()
@@ -27,69 +88,97 @@ class COCODataset(Dataset):
         return len(self.folders)
     
     def __getitem__(self, i): 
+        # Loading image and annotation 
         folder = self.folders[i]
-        img = cv2.imread(self.path / (folder + "/img.png"))
+        img = cv2.imread(self.path / folder / "img.png")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        annotations = th.load(self.path / (folder + "/anno.pth"), weights_only=False)
+        annotations = th.load(self.path / folder / "anno.pth", weights_only=False)
         
         masks = annotations["masks"]
         masks_full = [decode(mask) for mask in masks]
+        if self.include_original_image: 
+            annotations['image'] = img
         boxes = annotations['boxes']
-        class_labels = annotations['labels'].numpy()
+        labels = annotations['labels'].numpy()
 
-        if self.include_original_image: annotations['image'] = img
+        if self.instance_aug is not None: 
+            # Load which instances have augmentations 
+            instances = defaultdict(list)
+            with open(self.path / folder / 'variants.txt', 'r') as f:
+                for line in f: 
+                    entries = line.strip().split()
+                    instances[entries[0]].append(entries[1])
+            # For each instance choose an augmentation or to keep the original 
+            instance_choices = np.zeros(len(labels), dtype=int) - 1
+            choices = np.random.binomial(1, size=len(instance_choices), p=self.instance_aug)
+            augmentations = []
+            for i in range(len(instance_choices)): 
+                if choices[i] and str(i) in instances.keys(): 
+                    aug = np.random.choice(instances[str(i)])
+                    aug = cv2.imread(self.path / folder / 'variants' / f'{i}_{aug}.png')
+                    aug = cv2.cvtColor(aug, cv2.COLOR_BGR2RGB)
+                    (x_1, y_1, x_2, y_2) = boxes[i]
+                    if aug.shape != (y_2-y_1, x_2-x_1, 3): 
+                        aug = cv2.resize(aug, dsize=(x_2-x_1, y_2-y_1,))
+                    padded_aug = np.zeros_like(img)
+                    padded_aug[y_1:y_2, x_1:x_2] = aug
+
+                    instance_choices[i] = len(augmentations)
+                    augmentations.append(padded_aug)
+        
+        # Generate image and collect masks for each class 
+        area = th.tensor([mask.sum() for mask in masks_full]).argsort(descending=True)
+        segmentation_mask = np.zeros((img.shape[0], img.shape[1]), dtype=int) + 80
+        new_image = img.copy() 
+
+        for a in area:
+            segmentation_mask[masks_full[a] != 0] = int(labels[a]) 
+            if self.instance_aug is not None: 
+                instance = instance_choices[a]
+                instance = img if instance == -1 else augmentations[instance]
+                new_image[masks_full[a] != 0] = instance[masks_full[a] != 0]
+                    
+        if self.diffusion_aug: raise NotImplementedError
+
         if self.transform:
             augmented = self.transform(
-                image=img,
-                masks=masks_full,
-                bboxes=boxes,
-                class_labels=annotations['labels'].numpy()
+                image=new_image,
+                masks=[segmentation_mask]
             )
-            img = augmented['image']
-            masks_full = th.stack(augmented['masks'])
-            boxes = augmented['bboxes']
-            class_labels = augmented['class_labels']
-        
-        area = th.tensor([mask.sum() for mask in masks_full]).argsort(descending=True)
+            new_image = augmented['image']
+            segmentation_mask = th.stack(augmented['masks']).squeeze().long()
 
-        segmentation_mask = th.zeros_like(masks_full[0], dtype=th.long) + 80# th.zeros(80, *masks_full[0].shape) # TODO: How do we collapse classes? Is the order here the draw order. 
-        # for i, label in enumerate(class_labels):
-        #     segmentation_mask[int(label)][masks_full[i].to(bool)] = 1
-        for a in area:
-            segmentation_mask[masks_full[a].to(bool)]  = int(class_labels[a]) 
-            # new_image[masks_full] = patch 
-        # for (c, m) in zip(class_labels, masks_full): 
-        #     segmentation_mask[m.to(bool)] = int(c) + 1
-
-        annotations['img_shape'] = (img.shape[1], img.shape[2])
-        annotations['masks'] = tv_tensors.Mask(data=masks_full)
+        annotations['img_shape'] = (new_image.shape[1], new_image.shape[2])
         annotations['semantic_mask'] = segmentation_mask
         annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
-        annotations['labels'] = th.tensor(class_labels.astype(int))
+        annotations['labels'] = th.tensor(labels.astype(int))
     
-        return img, annotations
+        return new_image, annotations
     
 class COCODataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None, data_fraction: float = 1):
+    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None, augmentations=None, diffusion_aug=None, instance_aug=None, data_fraction: float = 1):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.transform = transform
+        self.augmentations = augmentations
         self.data_fraction = data_fraction
+        self.instance_aug = instance_aug
+        self.diffusion_aug = diffusion_aug
         
         self.setup()
 
     def setup(self, stage=None):
-        train_set = COCODataset(self.data_dir / 'train', transform=self.transform)
+        train_set = COCODatasetv2(self.data_dir / 'train', transform=self.augmentations, diffusion_aug=self.diffusion_aug, instance_aug=self.instance_aug)
         n_train = len(train_set)
         train_idx = th.randperm(n_train)[:int(n_train*self.data_fraction)].tolist()
         
         self.train_set = Subset(train_set, train_idx)
-        self.val_set = COCODataset(self.data_dir / 'val', transform=self.transform, include_original_image=True)
+        self.val_set = COCODatasetv2(self.data_dir / 'val', transform=self.transform, include_original_image=True)
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno)
+        return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno, drop_last=True)
 
     def val_dataloader(self):
         return DataLoader(self.val_set, batch_size=self.batch_size, num_workers=self.num_workers, collate_fn=collate_img_anno)
@@ -101,7 +190,7 @@ class COCODataModule(pl.LightningDataModule):
 if __name__ == "__main__": 
     from tqdm import tqdm
 
-    dm = COCODataModule(batch_size=2, num_workers=0)
+    dm = COCODataModule(data_dir=Path('C:/Users/david/Desktop/coco/train'), batch_size=2, num_workers=0, instance_aug=0.2)
     dm.setup()
     dl = dm.train_dataloader()
 
