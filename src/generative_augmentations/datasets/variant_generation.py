@@ -3,8 +3,7 @@ from pathlib import Path
 from PIL import Image
 import re
 import logging
-from itertools import batched
-import shutil
+import warnings
 
 import tyro
 import torch as th
@@ -19,7 +18,9 @@ from transformers.pipelines.text_generation import TextGenerationPipeline
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.auto.image_processing_auto import AutoImageProcessor
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
-from controlnet_aux.processor import HEDdetector
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    from controlnet_aux.processor import HEDdetector
 from diffusers.models.controlnets.controlnet import ControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet_inpaint_sd_xl import StableDiffusionXLControlNetInpaintPipeline
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -48,6 +49,9 @@ from src.generative_augmentations.config import Config
 logger = logging.getLogger(__name__)
 
 
+th.set_float32_matmul_precision("medium")
+
+
 class VariantGeneration:
     def __init__(
         self,
@@ -71,10 +75,7 @@ class VariantGeneration:
         self.depth_model = self._get_depth_model()
         # Based upon: https://arxiv.org/abs/2302.05543
         self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
-        # Based upon: https://arxiv.org/abs/2311.06242
-        # TODO: Figure out why florence is so slow at loading initially
-        # self.vqa_model = AutoModelForCausalLM.from_pretrained("microsoft/Florence-2-base", torch_dtype=self.dtype, trust_remote_code=True).to(device)
-        # self.vqa_model_tokenizer = AutoProcessor.from_pretrained("microsoft/Florence-2-base", trust_remote_code=True)
+        # Based upon: https://arxiv.org/abs/2407.07726
         self.vqa_model, self.vqa_model_tokenizer = self._get_vqa_model()
         # Based upon: https://arxiv.org/abs/2407.10671
         self.prompt_model = self._get_prompt_model()
@@ -88,19 +89,6 @@ class VariantGeneration:
         with open(self.input_dir / "image_names.txt", 'r') as file:
             self.img_dirs = file.readline().strip().split(" ")
 
-    def _get_vqa_model(self) -> tuple[PaliGemmaForConditionalGeneration, AutoProcessor]: 
-        # Get the model 
-        model_id = "google/paligemma-3b-ft-cococap-448"
-        vqa_model = PaliGemmaForConditionalGeneration.from_pretrained(
-            model_id, 
-            torch_dtype=self.dtype, 
-            device_map=self.device, 
-            revision="bfloat16"
-        ).eval()
-
-        vqa_tokenizer = AutoProcessor.from_pretrained(model_id)
-        return vqa_model, vqa_tokenizer
-        
 
     def _get_depth_model(self) -> DepthEstimationPipeline:
         # Remove info logging
@@ -132,6 +120,20 @@ class VariantGeneration:
         return pipe
 
 
+    def _get_vqa_model(self) -> tuple[PaliGemmaForConditionalGeneration, AutoProcessor]: 
+        # Get the model 
+        model_id = "google/paligemma2-3b-mix-224"
+        vqa_model = PaliGemmaForConditionalGeneration.from_pretrained(
+            model_id, 
+            torch_dtype=self.dtype, 
+            device_map=self.device
+        ).eval()
+
+        vqa_tokenizer = AutoProcessor.from_pretrained(model_id)
+
+        return vqa_model, vqa_tokenizer
+
+
     def _get_prompt_model(self) -> TextGenerationPipeline:
         # Remove info logging
         pipe_logger = logging.getLogger("transformers.pipelines.base")
@@ -141,7 +143,7 @@ class VariantGeneration:
         # Get depth model pipeline
         pipe = cast(
             TextGenerationPipeline,
-            pipeline(task="text-generation", model="Qwen/Qwen2-1.5B-Instruct", torch_dtype=self.dtype, device_map=self.device)
+            pipeline(task="text-generation", model="Qwen/Qwen3-1.7B", torch_dtype=self.dtype, device_map=self.device)
         )
 
         # Reset logger level
@@ -159,8 +161,8 @@ class VariantGeneration:
         )
         controlnet_edge = ControlNetModel.from_pretrained(
             "SargeZT/controlnet-sd-xl-1.0-softedge-dexined",
-            # "diffusers/controlnet-canny-sdxl-1.0",
             torch_dtype=self.dtype,
+            use_safetensors=False,
         )
         
         vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=self.dtype)
@@ -170,11 +172,14 @@ class VariantGeneration:
             controlnet=[controlnet_depth, controlnet_edge],
             vae=vae,
             torch_dtype=self.dtype
-        ).to(self.device)
-        
+        )
+
         diffusion_model.set_progress_bar_config(disable=True)
 
-        # self.diffusion_model.enable_model_cpu_offload()
+        diffusion_model.enable_model_cpu_offload()
+        diffusion_model.enable_xformers_memory_efficient_attention()
+        # diffusion_model.to(self.device, dtype=self.dtype)
+
 
         return diffusion_model
 
@@ -193,13 +198,12 @@ class VariantGeneration:
         #  In such a case, maybe cut out the instance via the mask first.
         
         # Prepare prompt
-        prompt = "caption en"
-        inputs = self.vqa_model_tokenizer(
+        prompt = "<image>describe en"
+        inputs = self.vqa_model_tokenizer( # pyright: ignore[ reportCallIssue ]
             text=prompt,
             images=img * 255.0,
             return_tensors="pt"
         ).to(self.vqa_model.device, self.vqa_model.dtype)
-
         inputs_len = inputs['input_ids'].shape[-1]
 
         with th.inference_mode():
@@ -212,7 +216,7 @@ class VariantGeneration:
 
             # Decode and parse answer
             outputs = generated_ids[0][inputs_len:]
-            description = self.vqa_model_tokenizer.decode(outputs, skip_special_tokens=True)
+            description = self.vqa_model_tokenizer.decode(outputs, skip_special_tokens=True) # pyright: ignore[ reportAttributeAccessIssue ]
 
 
         # Pray to the AI overloads that the description is not malformed or incorrect
@@ -227,16 +231,27 @@ class VariantGeneration:
             # Generate prompt
             # NOTE: You have no idea how long it took me to prompt engineer this
             instructions = [
-                {"role": "system", "content": "You are strictly a text model part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change up the colors and lighting in the reformulations."},
-                {"role": "user", "content": description},
+                {"role": "system", "content": "You are strictly a text model assistant part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program with a focus on describing the primary subject. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change colors, lighting, textures, or other details on the primary subject in the reformulations."},
+                {"role": "user", "content": f"The photo's primary subject is: {label}. " + description},
             ]
 
-            # Prompt model to give more descriptions
-            outputs = self.prompt_model(instructions, max_new_tokens=256, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+            with th.inference_mode():
+                # Prompt model to give more descriptions
+                outputs = self.prompt_model(instructions, max_new_tokens=16384, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
+
+            # Retrieve output
+            output = cast(str, outputs[0]["generated_text"][-1]['content']) # pyright: ignore[ reportArgumentType, reportIndexIssue, reportOptionalSubscript ]
+            
+            # Find end of thinking process
+            thinking_end_idx = output.rfind("</think>")
+
+            # If no thinking, retry
+            if thinking_end_idx == -1:
+                continue
 
             # Parse output
-            output: str = cast(str, outputs[0]["generated_text"][-1]['content'].strip().strip("[]'\"")) # type: ignore
-            prompts.extend(re.split(r"[\"\'],[ \n]*[\"\']", output))
+            output: str = output[thinking_end_idx+8:].strip().strip("[]'\"")
+            prompts.extend(re.split(r"[\"\']\]?,?[ \n]*\[?[\"\']", output))
 
 
         # Take the first num_variants, prepend the label and return the prompt
@@ -248,20 +263,21 @@ class VariantGeneration:
         depths = (depths - depth_min) / (depth_max - depth_min)
         edges = resize(edges, list(depths.shape))
 
-        variant = self.diffusion_model(
-            prompt=prompt,
-            negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
-            num_inference_steps=20,
-            eta=1.0,
-            image=img,
-            mask_image=mask,
-            control_image=[depths[None, None].repeat(1, 3, 1, 1), edges[None]],
-            strength=1.0,
-            controlnet_conditioning_scale=[0.9, 0.5],
-            guidance_scale=7.5,
-        ).images[0] # type: ignore
+        with th.inference_mode():
+            variant = self.diffusion_model(
+                prompt=prompt,
+                negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
+                num_inference_steps=20,
+                eta=1.0,
+                image=img,
+                mask_image=mask,
+                control_image=[depths[None, None].repeat(1, 3, 1, 1), edges[None]],
+                strength=1.0,
+                controlnet_conditioning_scale=[0.9, 0.5],
+                guidance_scale=7.5,
+            ).images[0] # type: ignore
 
-        return resize(to_tensor(variant).to(self.device, dtype=self.dtype), (img.shape[1], img.shape[2]))
+        return resize(to_tensor(variant).to(self.device, dtype=self.dtype), [img.shape[1], img.shape[2]])
 
 
     def generate_variants(self, img_dir: Path) -> None:
@@ -313,9 +329,8 @@ class VariantGeneration:
             if (x2 - x1) < self.bbox_min_side_length or (y2 - y1) < self.bbox_min_side_length:
                 continue
 
-            # Decode instance segmentation mask
-            mask = mask[instance_idx]
-            # mask = th.tensor(decode(masks[instance_idx]), dtype=self.dtype).to(self.device)
+            # Get instance mask
+            mask = masks[instance_idx]
 
             # Mean depth to determine draw order
             depth_instance = (depths[instance_idx] * mask).sum() / (mask.sum() + 1e-6)
@@ -344,8 +359,14 @@ class VariantGeneration:
                 
                 # Crop to bounding box and save variant
                 crop = variant[:, y1:y2, x1:x2].to(device=th.device("cpu"), dtype=th.float32)
-                variant_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
-                save_image(crop, str(variant_file))
+                variant_image_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
+                variant_prompt_file = variant_dir / f"{instance_idx}_{variant_idx}.txt"
+
+                save_image(crop, str(variant_image_file))
+
+                # Save prompt
+                with open(variant_prompt_file, 'w') as file:
+                    file.write(prompts[variant_idx])
 
                 # Save metadata
                 with open(metadata_file, 'a') as file:
