@@ -1,18 +1,18 @@
 #!/bin/bash
-#BSUB -J gen_aug_adlcv[47-52]
+#BSUB -J gen_aug_adlcv[1-16]
 #BSUB -q gpua10
-#BSUB -W 12:00
+#BSUB -W 24:00
 #BSUB -R "rusage[mem=5GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -n 4
 
-#BSUB -o %J_%I_out-gen_aug.out 
-#BSUB -e %J_%I_out-gen_aug.err
+#BSUB -o outputfiles/%J_%I_out-gen_aug.out 
+#BSUB -e outputfiles/%J_%I_out-gen_aug.err
 
 
 
-start_frac=$(echo "scale=6; ($LSB_JOBINDEX - 1) / 64" | bc)
-end_frac=$(echo "scale=6; $LSB_JOBINDEX / 64" | bc)
+start_frac=$(echo "scale=6; ($LSB_JOBINDEX - 1) / 16" | bc)
+end_frac=$(echo "scale=6; $LSB_JOBINDEX / 16" | bc)
 
 export HF_HOME=/work3/s204102/huggingface_cache
 

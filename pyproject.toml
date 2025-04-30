@@ -17,12 +17,14 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "pycocotools>=2.0.8",
     "pytorch-optimizer>=3.5.0",
+    "timm>=0.6.7",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
     "tqdm>=4.67.1",
     "transformers>=4.51.3",
     "tyro>=0.9.18",
     "wandb>=0.19.8",
+    "xformers>=0.0.29.post3",
 ]
 
 
@@ -47,6 +49,13 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+override-dependencies = [
+  "timm==0.9.12"
+  # "timm==0.6.12"
+  # "timm==1.0.13"
+  # "timm==1.0.13"
+]
+
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
