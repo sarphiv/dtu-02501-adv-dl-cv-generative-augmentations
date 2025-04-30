@@ -10,6 +10,10 @@ import cv2
 from pycocotools.mask import decode
 from torchvision import tv_tensors
 from torchvision.transforms.functional import resize
+from albumentations import BaseCompose
+
+from src.generative_augmentations.datasets.coco import index_to_name
+
 
 def collate_img_anno(batch): 
     images = th.stack([item[0] for item in batch])
@@ -73,12 +77,12 @@ def collate_img_anno(batch):
 #         return img, annotations
 
 class COCODatasetv2(Dataset): 
-    def __init__(self, path: Path, transform=None, diffusion_aug=None, instance_aug=None, include_original_image=False) -> None: 
+    def __init__(self, path: Path, transform: BaseCompose | None = None, augmentation_diffusion_prob: float | None = None, augmentation_instance_prob: float | None = None, include_original_image: bool = False) -> None: 
         super().__init__()
         self.path = path 
         self.transform = transform
-        self.diffusion_aug = diffusion_aug
-        self.instance_aug = instance_aug
+        self.augmentation_diffusion_prob = augmentation_diffusion_prob
+        self.augmentation_instance_prob = augmentation_instance_prob
         self.include_original_image = include_original_image
         with open(path / 'image_names.txt', 'r') as file:
             line = file.readline().strip()
@@ -101,7 +105,7 @@ class COCODatasetv2(Dataset):
         boxes = annotations['boxes']
         labels = annotations['labels'].numpy()
 
-        if self.instance_aug is not None: 
+        if self.augmentation_instance_prob is not None: 
             # Load which instances have augmentations 
             instances = defaultdict(list)
             with open(self.path / folder / 'variants.txt', 'r') as f:
@@ -110,7 +114,7 @@ class COCODatasetv2(Dataset):
                     instances[entries[0]].append(entries[1])
             # For each instance choose an augmentation or to keep the original 
             instance_choices = np.zeros(len(labels), dtype=int) - 1
-            choices = np.random.binomial(1, size=len(instance_choices), p=self.instance_aug)
+            choices = np.random.binomial(1, size=len(instance_choices), p=self.augmentation_instance_prob)
             augmentations = []
             for i in range(len(instance_choices)): 
                 if choices[i] and str(i) in instances.keys(): 
@@ -127,18 +131,18 @@ class COCODatasetv2(Dataset):
                     augmentations.append(padded_aug)
         
         # Generate image and collect masks for each class 
-        area = th.tensor([mask.sum() for mask in masks_full]).argsort(descending=True)
-        segmentation_mask = np.zeros((img.shape[0], img.shape[1]), dtype=int) + 80
+        area = th.tensor([int(mask.sum()) for mask in masks_full]).argsort(descending=True)
+        segmentation_mask = np.zeros((img.shape[0], img.shape[1]), dtype=int) + len(index_to_name) - 1
         new_image = img.copy() 
 
         for a in area:
             segmentation_mask[masks_full[a] != 0] = int(labels[a]) 
-            if self.instance_aug is not None: 
+            if self.augmentation_instance_prob is not None: 
                 instance = instance_choices[a]
                 instance = img if instance == -1 else augmentations[instance]
                 new_image[masks_full[a] != 0] = instance[masks_full[a] != 0]
                     
-        if self.diffusion_aug: raise NotImplementedError
+        if self.augmentation_diffusion_prob: raise NotImplementedError
 
         if self.transform:
             augmented = self.transform(
@@ -146,36 +150,48 @@ class COCODatasetv2(Dataset):
                 masks=[segmentation_mask]
             )
             new_image = augmented['image']
-            segmentation_mask = th.stack(augmented['masks']).squeeze().long()
+            segmentation_mask = augmented['masks'][0]
 
         annotations['img_shape'] = (new_image.shape[1], new_image.shape[2])
         annotations['semantic_mask'] = segmentation_mask
-        annotations['boxes'] = tv_tensors.BoundingBoxes(boxes, format='XYXY', canvas_size=annotations['img_shape'])
+        annotations['boxes'] = tv_tensors.BoundingBoxes(np.array(boxes), format='XYXY', canvas_size=annotations['img_shape'])
         annotations['labels'] = th.tensor(labels.astype(int))
     
         return new_image, annotations
     
 class COCODataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: Path = Path('./data/coco'), batch_size: int = 32, num_workers: int = 16, transform=None, augmentations=None, diffusion_aug=None, instance_aug=None, data_fraction: float = 1):
+    def __init__(
+            self,
+            data_dir: Path = Path('./data/coco'),
+            batch_size: int = 32,
+            num_workers: int = 16,
+            transform_train: BaseCompose | None = None,
+            transform_val: BaseCompose | None = None,
+            augmentation_instance_prob: float | None = None,
+            augmentation_diffusion_prob: float | None = None,
+            data_fraction: float = 1
+        ):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.transform = transform
-        self.augmentations = augmentations
+        
+        self.transform_train = transform_train
+        self.transform_val = transform_val
+        self.augmentation_instance_prob = augmentation_instance_prob
+        self.augmentation_diffusion_prob = augmentation_diffusion_prob
+
         self.data_fraction = data_fraction
-        self.instance_aug = instance_aug
-        self.diffusion_aug = diffusion_aug
         
         self.setup()
 
     def setup(self, stage=None):
-        train_set = COCODatasetv2(self.data_dir / 'train', transform=self.augmentations, diffusion_aug=self.diffusion_aug, instance_aug=self.instance_aug)
+        train_set = COCODatasetv2(self.data_dir / 'train', transform=self.transform_train, augmentation_diffusion_prob=self.augmentation_diffusion_prob, augmentation_instance_prob=self.augmentation_instance_prob)
         n_train = len(train_set)
         train_idx = th.randperm(n_train)[:int(n_train*self.data_fraction)].tolist()
         
         self.train_set = Subset(train_set, train_idx)
-        self.val_set = COCODatasetv2(self.data_dir / 'val', transform=self.transform, include_original_image=True)
+        self.val_set = COCODatasetv2(self.data_dir / 'val', transform=self.transform_val, include_original_image=True)
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno, drop_last=True)
@@ -190,7 +206,7 @@ class COCODataModule(pl.LightningDataModule):
 if __name__ == "__main__": 
     from tqdm import tqdm
 
-    dm = COCODataModule(data_dir=Path('C:/Users/david/Desktop/coco/train'), batch_size=2, num_workers=0, instance_aug=0.2)
+    dm = COCODataModule(data_dir=Path('C:/Users/david/Desktop/coco/train'), batch_size=2, num_workers=0, augmentation_instance_prob=0.2)
     dm.setup()
     dl = dm.train_dataloader()
 

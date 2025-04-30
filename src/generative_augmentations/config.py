@@ -3,6 +3,7 @@ from pathlib import Path
 
 import tyro
 
+from src.generative_augmentations.datasets.transforms import TransformTypes
 
 
 @dataclass
@@ -13,6 +14,7 @@ class ArtifactConfig:
     modeldir: str = ""
 
     log_image_every_n_epoch: int = 10
+    check_val_every_n_epochs: int = 3
     checkpoint_save_n_best: int = 1
     checkpoint_save_every_n_steps: int = 10000
 
@@ -32,6 +34,44 @@ class DataloaderConfig:
     data_fraction: float = 1.0
     data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
 
+
+
+@dataclass
+class AugmentationConfig:
+    augmentation_name: TransformTypes
+    instance_prob: float | None = None
+    diffusion_prob: float | None = None
+
+
+augmentation_config_none = AugmentationConfig(
+    augmentation_name="final transform",
+    instance_prob=None,
+    diffusion_prob=None
+)
+
+augmentation_config_simple = AugmentationConfig(
+    augmentation_name="simple augmentation",
+    instance_prob=None,
+    diffusion_prob=None
+)
+
+augmentation_config_advanced = AugmentationConfig(
+    augmentation_name="advanced augmentation",
+    instance_prob=None,
+    diffusion_prob=None
+)
+
+augmentation_config_instance = AugmentationConfig(
+    augmentation_name="simple augmentation",
+    instance_prob=0.3,
+    diffusion_prob=None
+)
+
+augmentation_config_instance_advanced = AugmentationConfig(
+    augmentation_name="advanced augmentation",
+    instance_prob=0.3,
+    diffusion_prob=None
+)
 
 
 @dataclass
@@ -59,4 +99,5 @@ class Config:
     dataloader: DataloaderConfig = field(default_factory=lambda: DataloaderConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
+    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_advanced)
     varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())

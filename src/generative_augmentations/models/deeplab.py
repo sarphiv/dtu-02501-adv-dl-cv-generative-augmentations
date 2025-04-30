@@ -54,7 +54,7 @@ class DeepLabv3Lightning(LightningModule):
         
         outputs = self.model.forward(images)
         pred_segmentations = outputs['out'] 
-        gt_segmentations = th.stack([targets[i]['semantic_mask'] for i in range(len(targets))])
+        gt_segmentations = th.stack([targets[i]['semantic_mask'] for i in range(len(targets))]).long()
         loss = self.criterion(pred_segmentations, gt_segmentations)
 
         # TODO: Logging
@@ -70,7 +70,7 @@ class DeepLabv3Lightning(LightningModule):
 
         outputs = self.model.forward(images)
         pred_segmentations = outputs['out'] 
-        gt_segmentations = th.stack([targets[i]['semantic_mask'] for i in range(len(targets))])
+        gt_segmentations = th.stack([targets[i]['semantic_mask'] for i in range(len(targets))]).long()
         loss = self.criterion(pred_segmentations, gt_segmentations)
 
         # Evaluate IoU, dice, precision, specificity, sensitivity and accuracy  
