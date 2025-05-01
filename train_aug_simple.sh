@@ -1,7 +1,7 @@
 #!/bin/bash
 #BSUB -J train_adlcv_no_aug[1-4]
 #BSUB -q gpua10
-#BSUB -W 12:00
+#BSUB -W 6:00
 #BSUB -R "rusage[mem=6GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -n 4
@@ -23,5 +23,5 @@ uv run python src/generative_augmentations/train.py \
     --model.max_epochs "$reverse_frac" \
     --artifact.log_image_every_n_epoch "$n_e_between_image" \
     --artifact.modeldir "/work3/s204102" \
-    --dataloader.augmentations "no"
+    --augmentation.augmentation_name "simple augmentation"
     

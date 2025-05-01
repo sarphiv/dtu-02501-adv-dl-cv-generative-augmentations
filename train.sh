@@ -1,10 +1,10 @@
 #!/bin/bash
 #BSUB -J train_adlcv[1-4]
-#BSUB -q gpua40
-#BSUB -W 24:00
-#BSUB -R "rusage[mem=2GB]"
+#BSUB -q gpua10
+#BSUB -W 12:00
+#BSUB -R "rusage[mem=6GB]"
 #BSUB -R "span[hosts=1]"
-#BSUB -n 8
+#BSUB -n 4
 
 #BSUB -o %J_%I_out-train.out 
 #BSUB -e %J_%I_out-train.err

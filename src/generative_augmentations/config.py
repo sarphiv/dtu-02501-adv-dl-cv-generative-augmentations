@@ -11,12 +11,12 @@ class ArtifactConfig:
     project_name: str = "generative-augmentations"
     experiment_name: str | None = None
     wandb_entity: str = "metrics_logger"
-    modeldir: str = ""
+    modeldir: str = "../scratch/models" if Path("../scratch/models").exists() else ""
 
     log_image_every_n_epoch: int = 10
     check_val_every_n_epochs: int = 3
     checkpoint_save_n_best: int = 1
-    checkpoint_save_every_n_steps: int = 10000
+    checkpoint_save_every_n_steps: int = 1000
 
 @dataclass
 class VarientGenerationConfig: 
@@ -27,13 +27,14 @@ class VarientGenerationConfig:
 
 @dataclass
 class DataloaderConfig:
-    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
+    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/coco"
 
-    num_workers: int = 8
-    batch_size: int = 32
+    num_workers: int = 15
+    batch_size: int = 24
     data_fraction: float = 1.0
-    data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
+    data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/coco"
 
+    augmentations: str = "simple" # "advanced", "diffusion", "instance"
 
 
 @dataclass
@@ -78,13 +79,13 @@ augmentation_config_instance_advanced = AugmentationConfig(
 class ModelConfig:
     max_epochs: int = 100
 
-    learning_rate_max: float = 1e-2
-    learning_rate_min: float = 1e-3
-    learning_rate_half_period: int = 2000
+    learning_rate_max: float = 0.003 # 1e-2
+    learning_rate_min: float = 0.0001 # 1e-3
+    learning_rate_half_period: int = 3000
     learning_rate_mult_period: int = 2
-    learning_rate_warmup_max: float = 4e-2
-    learning_rate_warmup_steps: int = 1000
-    weight_decay: float = 1e-6
+    learning_rate_warmup_max: float = 5e-4
+    learning_rate_warmup_steps: int = 8000
+    weight_decay: float = 1e-4
     pretrained_backbone: bool = True
     pretrained_head: bool = False
 
@@ -99,5 +100,7 @@ class Config:
     dataloader: DataloaderConfig = field(default_factory=lambda: DataloaderConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
-    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_advanced)
+    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_simple)
     varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
+
+
