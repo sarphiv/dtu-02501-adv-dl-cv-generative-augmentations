@@ -13,10 +13,10 @@ class ArtifactConfig:
     wandb_entity: str = "metrics_logger"
     modeldir: str = "../scratch/models" if Path("../scratch/models").exists() else ""
 
-    log_image_every_n_epoch: int = 10
-    check_val_every_n_epochs: int = 3
+    log_image_every_n_epoch: int = 16
+    check_val_every_n_epochs: int = 4
     checkpoint_save_n_best: int = 1
-    checkpoint_save_every_n_steps: int = 1000
+    checkpoint_save_every_n_steps: int = 400
 
 @dataclass
 class VarientGenerationConfig: 
@@ -100,7 +100,7 @@ class Config:
     dataloader: DataloaderConfig = field(default_factory=lambda: DataloaderConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
-    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_simple)
+    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_instance_advanced)
     varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
 
 
