@@ -80,7 +80,7 @@ if __name__ == "__main__":
     datamodule = COCODataModule(
         num_workers=1,
         batch_size=1,
-        transform_train=transforms["advanced augmentation"],
+        transform_train=transforms["final transform"],
         transform_val=transforms["final transform"],
         data_fraction=config.dataloader.data_fraction,
         data_dir=Path(config.dataloader.data_dir)
@@ -104,6 +104,8 @@ if __name__ == "__main__":
         img = np.clip(std * img + mean, 0, 1)
 
         mask = annotations[0]["semantic_mask"].cpu().numpy()
+
+        name = annotations[0]["name"]
         
         # Create legend labels
         label_ids = np.unique(mask).tolist()
@@ -130,7 +132,7 @@ if __name__ == "__main__":
             loc='upper center', 
             bbox_to_anchor=(0.5, 1.02), 
             ncol=min(len(legend), 5), 
-            title="Legend"
+            title=name
         )
 
         plt.tight_layout(rect=(0, 0, 1, 0.9))

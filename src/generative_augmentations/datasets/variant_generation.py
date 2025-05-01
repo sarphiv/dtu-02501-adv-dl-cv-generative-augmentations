@@ -59,12 +59,14 @@ class VariantGeneration:
         output_dir: Path | None = None,
         num_variants: int = 3,
         bbox_min_side_length: int = 75,
-        device: th.device | None = None
+        save_intermediate_date: bool = False,
+        device: th.device | None = None,
     ) -> None:
         self.input_dir = input_dir
         self.output_dir = output_dir if output_dir else input_dir
         self.num_variants = num_variants
         self.bbox_min_side_length = bbox_min_side_length
+        self.save_intermediate_data = save_intermediate_date
 
         self.device = device if device else th.device("cuda" if th.cuda.is_available() else "cpu")
         self.dtype = th.bfloat16 if th.cuda.is_available() else th.float32
@@ -176,9 +178,10 @@ class VariantGeneration:
 
         diffusion_model.set_progress_bar_config(disable=True)
 
-        diffusion_model.enable_model_cpu_offload()
-        diffusion_model.enable_xformers_memory_efficient_attention()
-        # diffusion_model.to(self.device, dtype=self.dtype)
+        if self.device.type == "cuda":
+            diffusion_model.enable_model_cpu_offload()
+            diffusion_model.enable_xformers_memory_efficient_attention()
+            # diffusion_model.to(self.device, dtype=self.dtype)
 
 
         return diffusion_model
@@ -259,10 +262,6 @@ class VariantGeneration:
 
 
     def _generate_inpaint(self, img: th.Tensor, mask: th.Tensor, depths: th.Tensor, edges: th.Tensor, prompt: str) -> th.Tensor:
-        depth_min, depth_max = depths.min(), depths.max()
-        depths = (depths - depth_min) / (depth_max - depth_min)
-        edges = resize(edges, list(depths.shape))
-
         with th.inference_mode():
             variant = self.diffusion_model(
                 prompt=prompt,
@@ -307,15 +306,29 @@ class VariantGeneration:
         output_img_dir.mkdir(parents=True, exist_ok=True)
         variant_dir = output_img_dir / "variants"
         variant_dir.mkdir(parents=True, exist_ok=True)
-        
+
         metadata_file = output_img_dir / "variants.txt"
         metadata_file.write_text("")
 
 
         # Estimate depth and edges for ControlNet
         depths = self._estimate_depth(img)
+        depth_min, depth_max = depths.min(), depths.max()
+        depths = (depths - depth_min) / (depth_max - depth_min)
+
         edges = self._estimate_edges(img)
+        edges = resize(edges, list(depths.shape))
+
         img = to_tensor(img).to(self.device)
+
+
+        # If intermediate outputs should be saved
+        if self.save_intermediate_data:
+            # Save edges
+            save_image(edges, variant_dir / f"edges.png")
+
+            # Save depth
+            save_image(depths, variant_dir / f"depths.png")
 
 
         # Generate variants for each instance
@@ -338,17 +351,29 @@ class VariantGeneration:
             # Get initial base prompt
             # NOTE: Expanding the bounding box to give some context
             pbar.set_description(f"Instance - Describing")
-            prompt_base = self._describe_object(
-                img[
-                    :,
-                    int(y1*(1-context_factor)):int(y2*(1+context_factor)),
-                    int(x1*(1-context_factor)):int(x2*(1+context_factor)),
-                ]
-            )
+            img_crop = img[
+                :,
+                int(y1*(1-context_factor)):int(y2*(1+context_factor)),
+                int(x1*(1-context_factor)):int(x2*(1+context_factor)),
+            ]
+            prompt_base = self._describe_object(img_crop)
 
             # Reforumlate prompt into multiple variants
             pbar.set_description(f"Instance - Prompting")
             prompts = self._generate_prompts(prompt_base, index_to_name[labels[instance_idx].item()])
+
+
+            # If intermediate outputs should be saved
+            if self.save_intermediate_data:
+                # Save base prompt
+                with open(variant_dir / f"{instance_idx}.prompt.txt", 'w') as file:
+                    file.write(prompt_base)
+
+                # Save instance mask
+                save_image(mask, variant_dir / f"{instance_idx}.mask.png")
+
+                # Save context crop
+                save_image(img_crop, variant_dir / f"{instance_idx}.crop.png")
 
 
             # Generate variants
@@ -356,31 +381,35 @@ class VariantGeneration:
             for variant_idx in trange(self.num_variants, desc="Variant", leave=False):
                 # Inpaint segmentation
                 variant = self._generate_inpaint(img, mask, depths, edges, prompts[variant_idx])
-                
+
                 # Crop to bounding box and save variant
                 crop = variant[:, y1:y2, x1:x2].to(device=th.device("cpu"), dtype=th.float32)
                 variant_image_file = variant_dir / f"{instance_idx}_{variant_idx}.png"
-                variant_prompt_file = variant_dir / f"{instance_idx}_{variant_idx}.txt"
 
                 save_image(crop, str(variant_image_file))
-
-                # Save prompt
-                with open(variant_prompt_file, 'w') as file:
-                    file.write(prompts[variant_idx])
 
                 # Save metadata
                 with open(metadata_file, 'a') as file:
                     file.write(f"{instance_idx} {variant_idx} {depth_instance.item()} {variant_dir.relative_to(self.output_dir)}\n")
+                
+                # If intermediate outputs should be saved
+                if self.save_intermediate_data:
+                    # Save prompt
+                    with open(variant_dir / f"{instance_idx}_{variant_idx}.prompt.txt", 'w') as file:
+                        file.write(prompts[variant_idx])
 
 
 
-    def run(self, start: int | float = 0.0, end: int | float = 1.0) -> None:
+
+    def run(self, start: int | float = 0.0, end: int | float = 1.0, img_dirs: list[str] | None = None) -> None:
+        img_dirs = img_dirs if img_dirs else self.img_dirs
+        
         if isinstance(start, float):
-            start = int(start * len(self.img_dirs))
+            start = int(start * len(img_dirs))
         if isinstance(end, float):
-            end = int(end * len(self.img_dirs))
+            end = int(end * len(img_dirs))
 
-        for img_dir in (pbar := tqdm(self.img_dirs[start:end])):
+        for img_dir in (pbar := tqdm(img_dirs[start:end])):
             pbar.set_description(f"Processing - {img_dir}")
             self.generate_variants(self.input_dir / img_dir)
 
@@ -388,8 +417,43 @@ class VariantGeneration:
 
 if __name__ == "__main__":
     args = tyro.cli(Config)
-    VariantGeneration(
+
+    variant_gen = VariantGeneration(
         input_dir=Path(args.dataloader.processed_data_dir) / "train",
         num_variants=args.varient_generation.num_variants,
-        bbox_min_side_length=args.varient_generation.bbox_min_side_length
-    ).run(start=args.varient_generation.subset_start, end=args.varient_generation.subset_end)
+        bbox_min_side_length=args.varient_generation.bbox_min_side_length,
+        save_intermediate_date=args.varient_generation.save_intermediate_data,
+    )
+
+
+    # Generate all
+    variant_gen.run(start=args.varient_generation.subset_start, end=args.varient_generation.subset_end)
+
+
+    # Generate a subset
+    # variant_gen.output_dir = variant_gen.output_dir.parent / "subset"
+    
+    # img_dirs = [
+    #     "000000000443",
+    #     "000000000599",
+    #     "000000000977",
+    #     "000000001228",
+    #     "000000001323",
+    #     "000000002093",
+    #     "000000002498",
+    #     "000000002639",
+    #     "000000003461",
+    #     "000000003623",
+    #     "000000003862",
+    #     "000000004282",
+    #     "000000005782",
+    #     "000000006026",
+    #     "000000008429",
+    #     "000000010104",
+    #     "000000010867",
+    #     "000000011794",
+    #     "000000012887",
+    #     "000000016905",
+    # ]
+
+    # variant_gen.run(img_dirs=img_dirs)

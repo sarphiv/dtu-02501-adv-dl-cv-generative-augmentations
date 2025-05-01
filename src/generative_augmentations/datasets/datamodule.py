@@ -156,6 +156,7 @@ class COCODatasetv2(Dataset):
         annotations['semantic_mask'] = segmentation_mask
         annotations['boxes'] = tv_tensors.BoundingBoxes(np.array(boxes), format='XYXY', canvas_size=annotations['img_shape'])
         annotations['labels'] = th.tensor(labels.astype(int))
+        annotations['name'] = folder
     
         return new_image, annotations
     

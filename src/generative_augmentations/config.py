@@ -11,7 +11,7 @@ class ArtifactConfig:
     project_name: str = "generative-augmentations"
     experiment_name: str | None = None
     wandb_entity: str = "metrics_logger"
-    modeldir: str = "../scratch/models" if Path("../scratch/models").exists() else ""
+    modeldir: str = "../scratch/models" if Path("../scratch/models").exists() else ".tmp/models"
 
     log_image_every_n_epoch: int = 16
     check_val_every_n_epochs: int = 4
@@ -24,15 +24,16 @@ class VarientGenerationConfig:
     subset_end: float = 1.0
     num_variants: int = 3
     bbox_min_side_length: int = 75
+    save_intermediate_data: bool = False
 
 @dataclass
 class DataloaderConfig:
-    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/coco"
+    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
 
     num_workers: int = 15
     batch_size: int = 24
     data_fraction: float = 1.0
-    data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/coco"
+    data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
 
     augmentations: str = "simple" # "advanced", "diffusion", "instance"
 
