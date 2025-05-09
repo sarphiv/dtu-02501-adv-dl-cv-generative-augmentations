@@ -16,4 +16,4 @@ end_frac=$(echo "scale=6; $LSB_JOBINDEX / 16" | bc)
 
 export HF_HOME=/work3/s204102/huggingface_cache
 
-uv run python src/generative_augmentations/datasets/variant_generation.py --varient_generation.subset_start "$start_frac" --varient_generation.subset_end "$end_frac"
+uv run python src/generative_augmentations/datasets/variant_generation.py --variant_generation.subset_start "$start_frac" --variant_generation.subset_end "$end_frac"

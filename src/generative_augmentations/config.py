@@ -17,7 +17,7 @@ class ArtifactConfig:
     checkpoint_save_every_n_steps: int = 400
 
 @dataclass
-class VarientGenerationConfig: 
+class VariantGenerationConfig: 
     input_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
     output_dir: str | None = None
     subset_start: float = 0.0
@@ -104,6 +104,6 @@ class Config:
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
     augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_instance_advanced)
-    varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
+    varient_generation: VariantGenerationConfig = field(default_factory=lambda: VariantGenerationConfig())
 
 
