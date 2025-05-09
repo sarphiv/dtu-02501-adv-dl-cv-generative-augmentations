@@ -13,7 +13,7 @@ class ArtifactConfig:
     wandb_entity: str = "metrics_logger"
     modeldir: str = "../scratch/models" if Path("../scratch/models").exists() else ".tmp/models"
 
-    log_image_every_n_epoch: int = 16
+    log_image_every_n_epoch: int = 1
     check_val_every_n_epochs: int = 4
     checkpoint_save_n_best: int = 1
     checkpoint_save_every_n_steps: int = 400
@@ -34,6 +34,7 @@ class DataloaderConfig:
     batch_size: int = 24
     data_fraction: float = 1.0
     data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
+    pin_images_to_ram: bool = True
 
     augmentations: str = "simple" # "advanced", "diffusion", "instance"
 
@@ -82,10 +83,10 @@ class ModelConfig:
 
     learning_rate_max: float = 0.003 # 1e-2
     learning_rate_min: float = 0.0001 # 1e-3
-    learning_rate_half_period: int = 3000
+    learning_rate_half_period: int = 12000
     learning_rate_mult_period: int = 2
-    learning_rate_warmup_max: float = 5e-4
-    learning_rate_warmup_steps: int = 8000
+    learning_rate_warmup_max: float = 0.003 #5e-4
+    learning_rate_warmup_steps: int = 16000
     weight_decay: float = 1e-4
     pretrained_backbone: bool = True
     pretrained_head: bool = False

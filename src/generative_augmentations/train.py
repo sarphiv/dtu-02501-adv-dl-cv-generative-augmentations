@@ -38,7 +38,8 @@ def main(config: Config) -> int:
                                 augmentation_instance_prob=config.augmentation.instance_prob,
                                 augmentation_diffusion_prob=config.augmentation.diffusion_prob, 
                                 data_fraction=config.dataloader.data_fraction,
-                                data_dir=Path(config.dataloader.data_dir))
+                                data_dir=Path(config.dataloader.data_dir), 
+                                pin_images_mem=config.dataloader.pin_images_to_ram)
 
 
     # Set up trainer

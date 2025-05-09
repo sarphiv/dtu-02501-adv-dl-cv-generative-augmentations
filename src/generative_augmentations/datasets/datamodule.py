@@ -3,6 +3,7 @@ from typing import Callable
 from collections import defaultdict
 
 import lightning as pl
+from tqdm import tqdm 
 import numpy as np
 import torch as th 
 from torch.utils.data import Dataset, DataLoader, Subset
@@ -77,25 +78,33 @@ def collate_img_anno(batch):
 #         return img, annotations
 
 class COCODatasetv2(Dataset): 
-    def __init__(self, path: Path, transform: BaseCompose | None = None, augmentation_diffusion_prob: float | None = None, augmentation_instance_prob: float | None = None, include_original_image: bool = False) -> None: 
+    def __init__(self, path: Path, transform: BaseCompose | None = None, augmentation_diffusion_prob: float | None = None, augmentation_instance_prob: float | None = None, include_original_image: bool = False, pin_images_mem: bool = False) -> None: 
         super().__init__()
         self.path = path 
         self.transform = transform
         self.augmentation_diffusion_prob = augmentation_diffusion_prob
         self.augmentation_instance_prob = augmentation_instance_prob
         self.include_original_image = include_original_image
+        self.pin_images_mem = pin_images_mem
         with open(path / 'image_names.txt', 'r') as file:
             line = file.readline().strip()
         self.folders = line.split(' ')
-    
+        
+        if pin_images_mem: 
+            self.images = [self._get_img_from_mem(folder) for folder in tqdm(self.folders)] 
+                
+    def _get_img_from_mem(self, folder: str):
+        img = cv2.imread(str(self.path / folder / "img.png"))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        return img
+        
     def __len__(self): 
         return len(self.folders)
     
     def __getitem__(self, i): 
         # Loading image and annotation 
         folder = self.folders[i]
-        img = cv2.imread(self.path / folder / "img.png")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = self.images[i] if self.pin_images_mem else self._get_img_from_mem(folder)
         annotations = th.load(self.path / folder / "anno.pth", weights_only=False)
         
         masks = annotations["masks"]
@@ -170,7 +179,8 @@ class COCODataModule(pl.LightningDataModule):
             transform_val: BaseCompose | None = None,
             augmentation_instance_prob: float | None = None,
             augmentation_diffusion_prob: float | None = None,
-            data_fraction: float = 1
+            data_fraction: float = 1,
+            pin_images_mem: bool = False
         ):
         super().__init__()
         self.data_dir = data_dir
@@ -183,16 +193,28 @@ class COCODataModule(pl.LightningDataModule):
         self.augmentation_diffusion_prob = augmentation_diffusion_prob
 
         self.data_fraction = data_fraction
+        self.pin_images_mem = pin_images_mem
         
         self.setup()
 
     def setup(self, stage=None):
-        train_set = COCODatasetv2(self.data_dir / 'train', transform=self.transform_train, augmentation_diffusion_prob=self.augmentation_diffusion_prob, augmentation_instance_prob=self.augmentation_instance_prob)
+        train_set = COCODatasetv2(
+            self.data_dir / 'train', 
+            transform=self.transform_train, 
+            augmentation_diffusion_prob=self.augmentation_diffusion_prob, 
+            augmentation_instance_prob=self.augmentation_instance_prob, 
+            pin_images_mem=self.pin_images_mem
+        )
         n_train = len(train_set)
         train_idx = th.randperm(n_train)[:int(n_train*self.data_fraction)].tolist()
         
         self.train_set = Subset(train_set, train_idx)
-        self.val_set = COCODatasetv2(self.data_dir / 'val', transform=self.transform_val, include_original_image=True)
+        self.val_set = COCODatasetv2(
+            self.data_dir / 'val', 
+            transform=self.transform_val, 
+            include_original_image=True,
+            pin_images_mem=self.pin_images_mem
+        )
 
     def train_dataloader(self):
         return DataLoader(self.train_set, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers, collate_fn=collate_img_anno, drop_last=True)
