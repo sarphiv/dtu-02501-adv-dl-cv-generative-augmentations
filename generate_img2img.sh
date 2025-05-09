@@ -2,7 +2,7 @@
 #BSUB -J gen_aug_adlcv[1-4]
 #BSUB -q gpuv100
 #BSUB -W 16:00
-#BSUB -R "rusage[mem=4GB]"
+#BSUB -R "rusage[mem=6GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -n 4
 
