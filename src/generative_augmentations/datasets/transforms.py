@@ -12,7 +12,7 @@ transforms: dict[TransformTypes, A.Compose] = {}
 cv2_border_replicate = 1
 
 
-transforms["final transform"] =  A.Compose([
+transforms["final transform"] = A.Compose([
     A.Resize(224, 224),
     A.Normalize(
         mean=(0.485, 0.456, 0.406),
@@ -24,8 +24,7 @@ transforms["final transform"] =  A.Compose([
 
 transforms["simple augmentation"] = A.Compose([
     A.HorizontalFlip(),
-    # NOTE: Prefering to rotate then crop,
-    #  because this is more likely to leave center crops with no black borders.
+    # NOTE: Prefering to rotate then crop, because this is more likely to leave center crops with no black borders.
     A.Rotate(limit=30, border_mode=cv2_border_replicate),
     A.RandomCropFromBorders(crop_bottom=0.2, crop_left=0.2, crop_right=0.2, crop_top=0.2),
     A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
@@ -33,21 +32,20 @@ transforms["simple augmentation"] = A.Compose([
 ])
 
 
-transforms["advanced augmentation"] = A.Compose([
+transforms["advanced augmentation"] = A.Compose([ # pyright: ignore[reportArgumentType]
     A.MotionBlur(blur_limit=(3, 5)),
     A.OpticalDistortion(distort_limit=0.4, border_mode=cv2_border_replicate),
-    A.ThinPlateSpline(scale_range=(0.03, 0.07), border_mode=cv2_border_replicate),
+    A.ThinPlateSpline(scale_range=(0.03, 0.06), border_mode=cv2_border_replicate),
     A.HorizontalFlip(),
-    A.Affine(scale=(0.9, 2.0), translate_percent=0.1, shear=15, rotate=180, rotate_method="ellipse", border_mode=cv2_border_replicate),
-    # NOTE: Prefering to rotate then crop,
-    #  because this is more likely to leave center crops with no black borders.
+    A.Affine(scale=(0.9, 1.2), translate_percent=(0.0, 0.1), shear=(-7, 7), rotate=(-5, 5), rotate_method="ellipse", border_mode=cv2_border_replicate),
+    # NOTE: Prefering to rotate then crop, because this is more likely to leave center crops with no black borders.
     A.RandomCropFromBorders(crop_bottom=0.2, crop_left=0.2, crop_right=0.2, crop_top=0.2),
 
     A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-    A.RandomGamma(gamma_limit=(80, 180)),
-    A.ISONoise(),
-    A.Downscale(scale_range=(0.2, 0.8)),
-    A.ImageCompression(quality_range=(10, 80)),
+    A.RandomGamma(gamma_limit=(80, 140)),
+    A.ISONoise(color_shift=(0.01, 0.03), intensity=(0.1, 0.3)),
+    A.Downscale(scale_range=(0.6, 0.9)),
+    A.ImageCompression(quality_range=(40, 80)),
     
     transforms["final transform"]
 ])
@@ -73,6 +71,9 @@ if __name__ == "__main__":
     config = tyro.cli(Config)
 
     seed_everything(config.seed)
+    
+    # Next image on spacebar
+    plt.rcParams['keymap.quit'].append(' ')
 
 
 
@@ -80,13 +81,14 @@ if __name__ == "__main__":
     datamodule = COCODataModule(
         num_workers=1,
         batch_size=1,
-        transform_train=transforms["final transform"],
+        transform_train=transforms["advanced augmentation"],
         transform_val=transforms["final transform"],
         data_fraction=config.dataloader.data_fraction,
         data_dir=Path(config.dataloader.data_dir)
     )
 
     datamodule.setup()
+    datamodule.train_set.dataset.include_original_image = True # pyright: ignore[ reportAttributeAccessIssue ]
 
     # Set up standardization values
     mean = np.array([0.485, 0.456, 0.406])
@@ -99,9 +101,11 @@ if __name__ == "__main__":
 
     # Get a batch from the training dataloader
     for img, annotations in datamodule.train_dataloader():
-        # Extract item
+        # Extract items
         img = img[0].cpu().numpy().transpose(1, 2, 0)
         img = np.clip(std * img + mean, 0, 1)
+
+        img_original = annotations[0]["image"]
 
         mask = annotations[0]["semantic_mask"].cpu().numpy()
 
@@ -117,15 +121,19 @@ if __name__ == "__main__":
         ]
 
         # Plot
-        fig, axes = plt.subplots(1, 2, figsize=(9, 6))
-
-        axes[0].imshow(img)
-        axes[0].set_title("Image")
+        fig, axes = plt.subplots(1, 3, figsize=(15, 6))
+        
+        axes[0].imshow(img_original)
+        axes[0].set_title("Image - Original")
         axes[0].axis("off")
 
-        im = axes[1].imshow(mask, cmap=cmap, norm=norm)
-        axes[1].set_title("Semantic Mask")
+        axes[1].imshow(img)
+        axes[1].set_title("Image - Transformed")
         axes[1].axis("off")
+
+        axes[2].imshow(mask, cmap=cmap, norm=norm)
+        axes[2].set_title("Semantic Mask")
+        axes[2].axis("off")
 
         fig.legend(
             handles=legend, 
