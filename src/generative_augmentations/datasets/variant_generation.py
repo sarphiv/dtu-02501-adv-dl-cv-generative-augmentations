@@ -216,9 +216,9 @@ class VariantGeneration:
         pipeline.set_progress_bar_config(disable=True)
 
         if self.device.type == "cuda":
-            # diffusion_model.enable_model_cpu_offload()
+            pipeline.enable_model_cpu_offload()
             pipeline.enable_xformers_memory_efficient_attention()
-            # diffusion_model.to(self.device, dtype=self.dtype)
+            # pipeline.to(self.device, dtype=self.dtype)
 
         return pipeline # pyright: ignore[ reportReturnType ]
 
