@@ -14,7 +14,7 @@
 
 uv run python src/generative_augmentations/train.py \
     --dataloader.data_fraction 1.0 \
-    --model.max_epochs 400 \
+    --model.max_epochs 385 \
     --artifact.check_val_every_n_epochs 10 \
     --artifact.modeldir "/work3/s204121/models" \
     --dataloader.data_dir "/work3/s204102/coco" \
