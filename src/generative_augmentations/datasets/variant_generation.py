@@ -490,9 +490,11 @@ class VariantGeneration:
 
 if __name__ == "__main__":
     args = tyro.cli(Config)
+    print(args.varient_generation)
 
     variant_gen = VariantGeneration(
-        input_dir=Path(args.dataloader.processed_data_dir) / "train",
+        input_dir=Path(args.varient_generation.input_dir) / "train",
+        output_dir=Path(args.varient_generation.output_dir) if args.varient_generation.output_dir else None,
         num_variants=args.varient_generation.num_variants,
         bbox_min_side_length=args.varient_generation.bbox_min_side_length,
         save_intermediate_date=args.varient_generation.save_intermediate_data,

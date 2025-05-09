@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import tyro
-
 from src.generative_augmentations.datasets.transforms import TransformTypes
 
 
@@ -20,6 +18,8 @@ class ArtifactConfig:
 
 @dataclass
 class VarientGenerationConfig: 
+    input_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
+    output_dir: str | None = None
     subset_start: float = 0.0
     subset_end: float = 1.0
     num_variants: int = 3
