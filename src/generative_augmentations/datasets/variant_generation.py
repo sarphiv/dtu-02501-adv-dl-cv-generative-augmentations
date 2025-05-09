@@ -23,6 +23,8 @@ with warnings.catch_warnings():
     from controlnet_aux.processor import HEDdetector
 from diffusers.models.controlnets.controlnet import ControlNetModel
 from diffusers.pipelines.controlnet.pipeline_controlnet_inpaint_sd_xl import StableDiffusionXLControlNetInpaintPipeline
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl import StableDiffusionXLPipeline
+from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl_img2img import StableDiffusionXLImg2ImgPipeline
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
 
 from src.generative_augmentations.datasets.coco import index_to_name
@@ -60,6 +62,7 @@ class VariantGeneration:
         num_variants: int = 3,
         bbox_min_side_length: int = 75,
         save_intermediate_date: bool = False,
+        full_pipeline: bool = True,
         device: th.device | None = None,
     ) -> None:
         self.input_dir = input_dir
@@ -67,29 +70,39 @@ class VariantGeneration:
         self.num_variants = num_variants
         self.bbox_min_side_length = bbox_min_side_length
         self.save_intermediate_data = save_intermediate_date
+        self.full_pipeline = full_pipeline
 
         self.device = device if device else th.device("cuda" if th.cuda.is_available() else "cpu")
         self.dtype = th.bfloat16 if th.cuda.is_available() else th.float32
 
         logger.info(f"Loading models...")
 
-        # Based upon: https://arxiv.org/abs/2406.09414
-        self.depth_model = self._get_depth_model()
-        # Based upon: https://arxiv.org/abs/2302.05543
-        self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
-        # Based upon: https://arxiv.org/abs/2407.07726
-        self.vqa_model, self.vqa_model_tokenizer = self._get_vqa_model()
-        # Based upon: https://arxiv.org/abs/2407.10671
-        self.prompt_model = self._get_prompt_model()
-        # Based upon: https://arxiv.org/abs/2307.01952
-        self.diffusion_model = self._get_diffusion_model()
-        
+        if self.full_pipeline:
+            # Based upon: https://arxiv.org/abs/2406.09414
+            self.depth_model = self._get_depth_model()
+            # Based upon: https://arxiv.org/abs/2302.05543
+            self.edge_model = HEDdetector.from_pretrained("lllyasviel/Annotators").to(self.device)
+            # Based upon: https://arxiv.org/abs/2407.07726
+            self.vqa_model, self.vqa_model_tokenizer = self._get_vqa_model()
+            # Based upon: https://arxiv.org/abs/2407.10671
+            self.prompt_model = self._get_prompt_model()
+            # Based upon: https://arxiv.org/abs/2307.01952
+            self.diffusion_model = self._get_diffusion_inpainting_model()
+            
+            self.generate_variants = self.generate_variants_full
+        else:
+            # Based upon: https://arxiv.org/abs/2307.01952
+            self.diffusion_model = self._get_diffusion_img2img_model()
+
+            self.generate_variants = self.generate_variants_partial
+
         logger.info(f"Loaded models")
 
 
         # Load names of image directories
         with open(self.input_dir / "image_names.txt", 'r') as file:
             self.img_dirs = file.readline().strip().split(" ")
+
 
 
     def _get_depth_model(self) -> DepthEstimationPipeline:
@@ -155,7 +168,7 @@ class VariantGeneration:
         return pipe
 
 
-    def _get_diffusion_model(self) -> StableDiffusionXLControlNetInpaintPipeline:
+    def _get_diffusion_inpainting_model(self) -> StableDiffusionXLControlNetInpaintPipeline:
         controlnet_depth = ControlNetModel.from_pretrained(
             "diffusers/controlnet-depth-sdxl-1.0",
             use_safetensors=True,
@@ -185,6 +198,29 @@ class VariantGeneration:
 
 
         return diffusion_model
+
+
+    def _get_diffusion_img2img_model(self) -> StableDiffusionXLImg2ImgPipeline:
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=self.dtype)
+
+        pipeline_text2image = StableDiffusionXLPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0", 
+            variant="fp16",
+            vae=vae,
+            torch_dtype=self.dtype, 
+            use_safetensors=True
+        ).to(self.device)
+
+
+        pipeline = StableDiffusionXLImg2ImgPipeline.from_pipe(pipeline_text2image).to(self.device)
+        pipeline.set_progress_bar_config(disable=True)
+
+        if self.device.type == "cuda":
+            # diffusion_model.enable_model_cpu_offload()
+            pipeline.enable_xformers_memory_efficient_attention()
+            # diffusion_model.to(self.device, dtype=self.dtype)
+
+        return pipeline # pyright: ignore[ reportReturnType ]
 
 
     def _estimate_depth(self, img: Image.Image) -> th.Tensor:
@@ -235,7 +271,7 @@ class VariantGeneration:
             # NOTE: You have no idea how long it took me to prompt engineer this
             instructions = [
                 {"role": "system", "content": "You are strictly a text model assistant part of an image generation pipeline. Your task is to slightly reformulate the text given by the user/program with a focus on describing the primary subject. You must provide MULTIPLE reformulations as a Python list of strings, i.e. ['reformulation 1', 'reformulation 2', ...]. You must ONLY answer with the provided format else you will break the image generation pipeline. You do NOT want to break the image generation pipeline. Change colors, lighting, textures, or other details on the primary subject in the reformulations."},
-                {"role": "user", "content": f"The photo's primary subject is: {label}. " + description},
+                {"role": "user", "content": f"The photo's primary subject is: {label}. {description}"},
             ]
 
             with th.inference_mode():
@@ -279,7 +315,7 @@ class VariantGeneration:
         return resize(to_tensor(variant).to(self.device, dtype=self.dtype), [img.shape[1], img.shape[2]])
 
 
-    def generate_variants(self, img_dir: Path) -> None:
+    def generate_variants_full(self, img_dir: Path) -> None:
         # Load image and annotations
         # TODO: Save everything as a dict of tensors/strings/lists to avoid weights_only=False
         img = Image.open(img_dir / "img.png")
@@ -400,6 +436,43 @@ class VariantGeneration:
 
 
 
+    def generate_variants_partial(self, img_dir: Path) -> None:
+        # Load image and annotations
+        # TODO: Save everything as a dict of tensors/strings/lists to avoid weights_only=False
+        img = to_tensor(Image.open(img_dir / "img.png")).to(self.device) # pyright: ignore[ reportArgumentType ]
+
+        annotations = th.load(img_dir / "anno.pth", weights_only=False)
+        labels = annotations["labels"]
+        # NOTE: Not repeating labels in the prompt as it lead to worse images
+        prompt = f"A photo of: " + ", ".join(set([index_to_name[label.item()] for label in labels])) + "."
+        
+        # Prepare output files
+        output_img_dir = self.output_dir / img_dir.name
+        output_img_dir.mkdir(parents=True, exist_ok=True)
+        img2img_dir = output_img_dir / "img2img"
+        img2img_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate variants via image to image
+        with th.inference_mode():
+            variants = self.diffusion_model(
+                prompt=prompt,
+                negative_prompt="low quality, bad quality, sketches, blurry, artifacts",
+                image=img,
+                num_inference_steps=50,
+                strength=0.25,
+                guidance_scale=4.0,
+                num_images_per_prompt=self.num_variants,
+            ) # type: ignore
+
+
+        for variant_idx in range(self.num_variants):
+            # Resize to original size and save variant
+            variant = resize(to_tensor(variants.images[variant_idx]), [img.shape[1], img.shape[2]]).to(dtype=th.float32) # pyright: ignore[ reportAttributeAccessIssue ]
+            variant_image_file = img2img_dir / f"{variant_idx}.png"
+
+            save_image(variant, str(variant_image_file))
+
+
 
     def run(self, start: int | float = 0.0, end: int | float = 1.0, img_dirs: list[str] | None = None) -> None:
         img_dirs = img_dirs if img_dirs else self.img_dirs
@@ -423,6 +496,7 @@ if __name__ == "__main__":
         num_variants=args.varient_generation.num_variants,
         bbox_min_side_length=args.varient_generation.bbox_min_side_length,
         save_intermediate_date=args.varient_generation.save_intermediate_data,
+        full_pipeline=args.varient_generation.full_pipeline,
     )
 
 

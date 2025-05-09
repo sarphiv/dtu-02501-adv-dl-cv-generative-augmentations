@@ -25,6 +25,7 @@ class VarientGenerationConfig:
     num_variants: int = 3
     bbox_min_side_length: int = 75
     save_intermediate_data: bool = False
+    full_pipeline: bool = True
 
 @dataclass
 class DataloaderConfig:
