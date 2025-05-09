@@ -1,8 +1,8 @@
 #!/bin/bash
 #BSUB -J gen_aug_adlcv[1-16]
-#BSUB -q gpua10
-#BSUB -W 24:00
-#BSUB -R "rusage[mem=5GB]"
+#BSUB -q gpua100
+#BSUB -W 16:00
+#BSUB -R "rusage[mem=6GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -n 4
 

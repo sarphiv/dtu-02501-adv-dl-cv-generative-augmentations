@@ -82,7 +82,7 @@ augmentation_config_instance_advanced = AugmentationConfig(
 class ModelConfig:
     max_epochs: int = 100
 
-    learning_rate_max: float = 0.003 # 1e-2
+    learning_rate_max: float = 0.005 # 1e-2
     learning_rate_min: float = 0.0001 # 1e-3
     learning_rate_half_period: int = 12000
     learning_rate_mult_period: int = 2

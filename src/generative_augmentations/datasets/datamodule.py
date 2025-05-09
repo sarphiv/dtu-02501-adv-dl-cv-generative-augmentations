@@ -195,9 +195,9 @@ class COCODataModule(pl.LightningDataModule):
         self.data_fraction = data_fraction
         self.pin_images_mem = pin_images_mem
         
-        self.setup()
+        self.setup2()
 
-    def setup(self, stage=None):
+    def setup2(self, stage=None):
         train_set = COCODatasetv2(
             self.data_dir / 'train', 
             transform=self.transform_train, 
