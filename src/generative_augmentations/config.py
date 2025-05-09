@@ -104,6 +104,6 @@ class Config:
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
     augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_instance_advanced)
-    varient_generation: VariantGenerationConfig = field(default_factory=lambda: VariantGenerationConfig())
+    variant_generation: VariantGenerationConfig = field(default_factory=lambda: VariantGenerationConfig())
 
 
