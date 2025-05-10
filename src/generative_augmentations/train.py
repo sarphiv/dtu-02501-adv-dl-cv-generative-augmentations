@@ -33,10 +33,10 @@ def main(config: Config) -> int:
     # Set up data
     datamodule = COCODataModule(num_workers=config.dataloader.num_workers,
                                 batch_size=config.dataloader.batch_size,
-                                transform_train=transforms[config.augmentation.augmentation_name], 
+                                transform_train=transforms[config.augmentation.augmentation_name],
                                 transform_val=transforms["final transform"],
                                 augmentation_instance_prob=config.augmentation.instance_prob,
-                                augmentation_diffusion_prob=config.augmentation.diffusion_prob, 
+                                augmentation_diffusion=config.augmentation.diffusion,
                                 data_fraction=config.dataloader.data_fraction,
                                 data_dir=Path(config.dataloader.data_dir), 
                                 pin_images_mem=config.dataloader.pin_images_to_ram)

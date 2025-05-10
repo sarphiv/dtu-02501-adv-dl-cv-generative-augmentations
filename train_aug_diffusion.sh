@@ -2,9 +2,9 @@
 #BSUB -J train_adlcv_diffusion_aug[1-4]
 #BSUB -q gpua10
 #BSUB -W 8:00
-#BSUB -R "rusage[mem=8GB]"
+#BSUB -R "rusage[mem=4GB]"
 #BSUB -R "span[hosts=1]"
-#BSUB -n 4
+#BSUB -n 8
 
 #BSUB -o outputfiles/diffusion/%J_%I_diffusion_aug.out 
 #BSUB -e outputfiles/diffusion/%J_%I_diffusion_aug.err
@@ -22,7 +22,7 @@ uv run python src/generative_augmentations/train.py \
     --dataloader.data_fraction "$fraction" \
     --model.max_epochs "$reverse_frac" \
     --artifact.check_val_every_n_epochs "$n_e_between_image" \
-    --artifact.modeldir "/work3/s204102" \
+    --artifact.modeldir "/work3/s204121/models" \
+    --dataloader.data_dir "/work3/s204121/data/processed" \
     --augmentation.augmentation_name "simple augmentation" \
-    --augmentation.diffusion_prob 0.5
-    
+    --augmentation.diffusion 0.5 3

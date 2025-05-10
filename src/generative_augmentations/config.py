@@ -29,52 +29,48 @@ class VariantGenerationConfig:
 
 @dataclass
 class DataloaderConfig:
-    processed_data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
-
-    num_workers: int = 15
+    num_workers: int = 8
     batch_size: int = 24
     data_fraction: float = 1.0
     data_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
     pin_images_to_ram: bool = True
-
-    augmentations: str = "simple" # "advanced", "diffusion", "instance"
 
 
 @dataclass
 class AugmentationConfig:
     augmentation_name: TransformTypes
     instance_prob: float | None = None
-    diffusion_prob: float | None = None
+    diffusion: tuple[float, int] | None = None
 
 
 augmentation_config_none = AugmentationConfig(
     augmentation_name="final transform",
     instance_prob=None,
-    diffusion_prob=None
+    diffusion=None
 )
 
 augmentation_config_simple = AugmentationConfig(
     augmentation_name="simple augmentation",
     instance_prob=None,
-    diffusion_prob=None
+    diffusion=None
 )
 
 augmentation_config_advanced = AugmentationConfig(
     augmentation_name="advanced augmentation",
     instance_prob=None,
-    diffusion_prob=None
+    diffusion=None
 )
 
 augmentation_config_instance = AugmentationConfig(
     augmentation_name="simple augmentation",
     instance_prob=0.3,
-    diffusion_prob=None
+    diffusion=None
 )
 
 augmentation_config_instance_advanced = AugmentationConfig(
     augmentation_name="advanced augmentation",
     instance_prob=0.3,
-    diffusion_prob=None
+    diffusion=None
 )
 
 
