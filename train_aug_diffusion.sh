@@ -1,7 +1,7 @@
 #!/bin/bash
 #BSUB -J train_adlcv_diffusion_aug[1-4]
-#BSUB -q gpua10
-#BSUB -W 8:00
+#BSUB -q gpuv100
+#BSUB -W 12:00
 #BSUB -R "rusage[mem=4GB]"
 #BSUB -R "span[hosts=1]"
 #BSUB -n 8
