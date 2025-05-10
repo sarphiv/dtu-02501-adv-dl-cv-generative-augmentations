@@ -216,9 +216,9 @@ class VariantGeneration:
         pipeline.set_progress_bar_config(disable=True)
 
         if self.device.type == "cuda":
-            # diffusion_model.enable_model_cpu_offload()
+            pipeline.enable_model_cpu_offload()
             pipeline.enable_xformers_memory_efficient_attention()
-            # diffusion_model.to(self.device, dtype=self.dtype)
+            # pipeline.to(self.device, dtype=self.dtype)
 
         return pipeline # pyright: ignore[ reportReturnType ]
 
@@ -490,18 +490,20 @@ class VariantGeneration:
 
 if __name__ == "__main__":
     args = tyro.cli(Config)
+    print(args.variant_generation)
 
     variant_gen = VariantGeneration(
-        input_dir=Path(args.dataloader.processed_data_dir) / "train",
-        num_variants=args.varient_generation.num_variants,
-        bbox_min_side_length=args.varient_generation.bbox_min_side_length,
-        save_intermediate_date=args.varient_generation.save_intermediate_data,
-        full_pipeline=args.varient_generation.full_pipeline,
+        input_dir=Path(args.variant_generation.input_dir) / "train",
+        output_dir=Path(args.variant_generation.output_dir) if args.variant_generation.output_dir else None,
+        num_variants=args.variant_generation.num_variants,
+        bbox_min_side_length=args.variant_generation.bbox_min_side_length,
+        save_intermediate_date=args.variant_generation.save_intermediate_data,
+        full_pipeline=args.variant_generation.full_pipeline,
     )
 
 
     # Generate all
-    variant_gen.run(start=args.varient_generation.subset_start, end=args.varient_generation.subset_end)
+    variant_gen.run(start=args.variant_generation.subset_start, end=args.variant_generation.subset_end)
 
 
     # Generate a subset

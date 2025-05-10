@@ -99,6 +99,13 @@ def main(config: Config) -> int:
     trainer.fit(model, datamodule=datamodule)
 
 
+    # Save the last model
+    trainer.save_checkpoint(
+        f"{config.artifact.modeldir}/models/{logger.experiment.name}/last.ckpt",
+        weights_only=True,
+    )
+
+
     # Return success
     return 0
 

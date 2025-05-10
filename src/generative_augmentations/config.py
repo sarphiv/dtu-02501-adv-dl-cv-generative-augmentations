@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import tyro
-
 from src.generative_augmentations.datasets.transforms import TransformTypes
 
 
@@ -19,7 +17,9 @@ class ArtifactConfig:
     checkpoint_save_every_n_steps: int = 400
 
 @dataclass
-class VarientGenerationConfig: 
+class VariantGenerationConfig: 
+    input_dir: str = "../scratch/coco" if Path("../scratch/coco").exists() else "data/processed"
+    output_dir: str | None = None
     subset_start: float = 0.0
     subset_end: float = 1.0
     num_variants: int = 3
@@ -104,6 +104,6 @@ class Config:
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
     augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_none)
-    varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
+    variant_generation: VariantGenerationConfig = field(default_factory=lambda: VariantGenerationConfig())
 
 
