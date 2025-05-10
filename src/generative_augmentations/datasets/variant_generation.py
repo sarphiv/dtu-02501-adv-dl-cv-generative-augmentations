@@ -193,7 +193,7 @@ class VariantGeneration:
 
         if self.device.type == "cuda":
             diffusion_model.enable_model_cpu_offload()
-            diffusion_model.enable_xformers_memory_efficient_attention()
+        #     diffusion_model.enable_xformers_memory_efficient_attention()
             # diffusion_model.to(self.device, dtype=self.dtype)
 
 

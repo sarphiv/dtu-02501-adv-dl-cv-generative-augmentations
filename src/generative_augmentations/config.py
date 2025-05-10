@@ -103,7 +103,7 @@ class Config:
     dataloader: DataloaderConfig = field(default_factory=lambda: DataloaderConfig())
     model: ModelConfig = field(default_factory=lambda: ModelConfig())
 
-    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_instance_advanced)
+    augmentation: AugmentationConfig = field(default_factory=lambda: augmentation_config_none)
     varient_generation: VarientGenerationConfig = field(default_factory=lambda: VarientGenerationConfig())
 
 
