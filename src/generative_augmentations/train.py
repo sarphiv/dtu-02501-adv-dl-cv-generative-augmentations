@@ -58,7 +58,7 @@ def main(config: Config) -> int:
                 every_n_train_steps=config.artifact.checkpoint_save_every_n_steps,
                 save_top_k=config.artifact.checkpoint_save_n_best,
                 mode="min",
-                monitor="val_loss",
+                monitor="val_iou",
             ),
             # ModelCheckpoint(
             #     dirpath="models/{logger.experiment.name}:{logger.experiment.hash}/",

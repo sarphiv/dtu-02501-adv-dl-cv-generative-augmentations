@@ -13,7 +13,7 @@ class ArtifactConfig:
 
     log_image_every_n_epoch: int = 1
     check_val_every_n_epochs: int = 4
-    checkpoint_save_n_best: int = 1
+    checkpoint_save_n_best: int = 2
     checkpoint_save_every_n_steps: int = 400
 
 @dataclass

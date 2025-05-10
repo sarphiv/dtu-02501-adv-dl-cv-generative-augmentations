@@ -13,7 +13,7 @@
 
 fractions=(1.0 0.5 0.25 0.125)
 fraction=${fractions[$((LSB_JOBINDEX - 1))]}
-reverse_fracs=(133 266 533 1066) #(100 200 400 800)
+reverse_fracs=(120 240 480 960) #(100 200 400 800)
 reverse_frac=${reverse_fracs[$((LSB_JOBINDEX - 1))]}
 n_e_between_images=(10 20 40 80)
 n_e_between_image=${n_e_between_images[$((LSB_JOBINDEX - 1))]}
