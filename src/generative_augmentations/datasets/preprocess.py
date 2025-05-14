@@ -73,6 +73,10 @@ def preprocess_annotation(img_path: Path, anno_path: Path, mode: str, img_id: st
     
 def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Path(''), n_samples: int = 10000):
     file_names = np.array(list(img_path.iterdir()))
+    if mode == "test":
+        file_names_val = np.loadtxt("data/coco/val/image_names.txt", dtype=str)
+        file_names_filt = [file for file in file_names if file.stem not in file_names_val]
+        file_names = file_names_filt
     sample_files = np.random.choice(file_names, size=n_samples, replace=False)
 
     for img_file in tqdm(sample_files):
@@ -84,5 +88,5 @@ def preprocess_all(img_path: Path, anno_path: Path, mode: str, parent: Path = Pa
 
 
 if __name__ == "__main__": 
-    preprocess_all(img_path=Path("data/raw/train"), anno_path=Path("data/raw/seg/labels/train2017"), mode="train", parent=Path("data/processed"), n_samples=10000)
-    preprocess_all(img_path=Path("data/raw/val"), anno_path=Path("data/raw/seg/labels/val2017"), mode="val", parent=Path("data/processed"), n_samples=1000)
+    # preprocess_all(img_path=Path("data/raw/train"), anno_path=Path("data/raw/seg/labels/train2017"), mode="train", parent=Path("data/processed"), n_samples=10000)
+    preprocess_all(img_path=Path("data/raw/dataval/val2017"), anno_path=Path("data/raw/datamasks/coco/labels/val2017"), mode="test", parent=Path("data/coco"), n_samples=1000)
